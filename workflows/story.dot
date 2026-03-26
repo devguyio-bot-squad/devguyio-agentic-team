@@ -1,0 +1,55 @@
+// Story workflow state machine
+// Statuses: dev:ready, qe:test-design, dev:implement, dev:code-review,
+//           qe:verify, arch:sign-off, po:merge, done
+
+digraph story {
+    rankdir=LR;
+    graph [fontname="Helvetica", bgcolor="transparent"];
+    node [fontname="Helvetica", style="filled", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // Developer (green)
+    node [fillcolor="#6EE7B7", color="#065F46", shape=box];
+    "dev:ready";
+    "dev:implement";
+    "dev:code-review";
+
+    // QE (cyan)
+    node [fillcolor="#67E8F9", color="#155E75", shape=box];
+    "qe:test-design";
+    "qe:verify";
+
+    // Architect (indigo)
+    node [fillcolor="#A5B4FC", color="#4338CA", shape=box];
+    "arch:sign-off";
+
+    // PO (amber)
+    node [fillcolor="#FCD34D", color="#B45309", shape=box];
+    "po:merge";
+
+    // Terminal (done)
+    node [fillcolor="#D1D5DB", color="#374151", shape=doublecircle];
+    "done";
+
+    // Error
+    node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
+    "error";
+
+    // --- Happy path transitions ---
+    "dev:ready" -> "qe:test-design" [label="start"];
+    "qe:test-design" -> "dev:implement" [label="tests designed"];
+    "dev:implement" -> "dev:code-review" [label="implementation done"];
+    "dev:code-review" -> "qe:verify" [label="code approved"];
+    "qe:verify" -> "arch:sign-off" [label="verified"];
+    "arch:sign-off" -> "po:merge" [label="signed off"];
+    "po:merge" -> "done" [label="merged"];
+
+    // --- Error transitions (any non-terminal -> error) ---
+    "dev:ready" -> "error" [style=dotted, color="#9CA3AF"];
+    "qe:test-design" -> "error" [style=dotted, color="#9CA3AF"];
+    "dev:implement" -> "error" [style=dotted, color="#9CA3AF"];
+    "dev:code-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "qe:verify" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:sign-off" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:merge" -> "error" [style=dotted, color="#9CA3AF"];
+}

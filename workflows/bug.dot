@@ -1,0 +1,62 @@
+// Bug workflow state machine (two-track: simple + complex)
+// Statuses: bug:investigate, arch:review, arch:refine, bug:breakdown,
+//           bug:in-progress, qe:verify, done
+
+digraph bug {
+    rankdir=LR;
+    graph [fontname="Helvetica", bgcolor="transparent"];
+    node [fontname="Helvetica", style="filled", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // Bug-specific (red)
+    node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
+    "bug:investigate";
+    "bug:breakdown";
+    "bug:in-progress";
+
+    // Architect (indigo)
+    node [fillcolor="#A5B4FC", color="#4338CA", shape=box];
+    "arch:review";
+    "arch:refine";
+
+    // PO (amber) — shared with epic workflow
+    node [fillcolor="#FCD34D", color="#B45309", shape=diamond];
+    "po:plan-review";
+
+    // QE (cyan) — shared with story workflow
+    node [fillcolor="#67E8F9", color="#155E75", shape=box];
+    "qe:verify";
+
+    // Terminal (done)
+    node [fillcolor="#D1D5DB", color="#374151", shape=doublecircle];
+    "done";
+
+    // Error
+    node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
+    "error";
+
+    // --- Simple track (fast path) ---
+    "bug:investigate" -> "arch:review" [label="simple fix"];
+    "arch:review" -> "qe:verify" [label="approved"];
+    "qe:verify" -> "done" [label="verified"];
+
+    // --- Complex track (full planning) ---
+    "bug:investigate" -> "arch:refine" [label="complex plan"];
+    "arch:refine" -> "po:plan-review" [label="plan ready"];
+    "po:plan-review" -> "bug:breakdown" [label="approved"];
+    "bug:breakdown" -> "bug:in-progress" [label="subtasks created"];
+    "bug:in-progress" -> "qe:verify" [label="all subtasks done"];
+
+    // --- Rejection / escalation loops ---
+    "arch:review" -> "arch:refine" [label="escalate", style=dashed, color="#B91C1C"];
+    "po:plan-review" -> "arch:refine" [label="rejected", style=dashed, color="#B91C1C"];
+    "qe:verify" -> "bug:investigate" [label="simple fail", style=dashed, color="#B91C1C"];
+    "qe:verify" -> "bug:in-progress" [label="complex fail", style=dashed, color="#B91C1C"];
+
+    // --- Error transitions ---
+    "bug:investigate" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:review" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:refine" -> "error" [style=dotted, color="#9CA3AF"];
+    "bug:breakdown" -> "error" [style=dotted, color="#9CA3AF"];
+    "bug:in-progress" -> "error" [style=dotted, color="#9CA3AF"];
+}

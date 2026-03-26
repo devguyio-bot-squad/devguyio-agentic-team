@@ -1,0 +1,30 @@
+// Manager workflow state machine
+// Statuses: mgr:todo, mgr:in-progress, mgr:done
+
+digraph manager {
+    rankdir=LR;
+    graph [fontname="Helvetica", bgcolor="transparent"];
+    node [fontname="Helvetica", style="filled", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // Manager (teal)
+    node [fillcolor="#5EEAD4", color="#115E59", shape=box];
+    "mgr:todo";
+    "mgr:in-progress";
+
+    // Terminal (mgr:done)
+    node [fillcolor="#5EEAD4", color="#115E59", shape=doublecircle];
+    "mgr:done";
+
+    // Error
+    node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
+    "error";
+
+    // --- Transitions ---
+    "mgr:todo" -> "mgr:in-progress" [label="start"];
+    "mgr:in-progress" -> "mgr:done" [label="complete"];
+
+    // --- Error transitions ---
+    "mgr:todo" -> "error" [style=dotted, color="#9CA3AF"];
+    "mgr:in-progress" -> "error" [style=dotted, color="#9CA3AF"];
+}

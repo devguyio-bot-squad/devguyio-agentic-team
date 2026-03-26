@@ -1,0 +1,159 @@
+name: scrum-compact
+display_name: Scrum Compact Solo Team
+description: Lightweight single-member team with GitHub-based human review. One agent wears all hats. Human approves/rejects via GitHub issue comments.
+version: '1.0.0'
+schema_version: '1.0'
+roles:
+- name: superman
+  description: All-in-one member — PO, architect, dev, QE, SRE, content writer
+- name: team-manager
+  description: Process improvement and team coordination
+labels:
+- name: kind/docs
+  color: '0075CA'
+  description: Label modifier — routes any issue type to content writer hats
+- name: role/team-manager
+  color: '5319E7'
+  description: Assigned to team manager
+statuses:
+- name: po:triage
+  description: New epic, awaiting evaluation
+- name: po:backlog
+  description: Accepted, prioritized, awaiting activation
+- name: arch:design
+  description: Architect producing design doc
+- name: po:design-review
+  description: Design doc awaiting human review
+- name: arch:plan
+  description: Architect proposing story breakdown
+- name: po:plan-review
+  description: Story breakdown awaiting human review (also used for complex bugs)
+- name: arch:breakdown
+  description: Architect creating story issues
+- name: lead:design-review
+  description: Design doc awaiting lead review
+- name: lead:plan-review
+  description: Story breakdown awaiting lead review
+- name: lead:breakdown-review
+  description: Story issues awaiting lead review
+- name: po:ready
+  description: Stories created, epic in ready backlog
+- name: arch:in-progress
+  description: Architect monitoring story execution
+- name: po:accept
+  description: Epic awaiting human acceptance
+- name: done
+  description: Complete
+- name: dev:ready
+  description: Story ready for development
+- name: qe:test-design
+  description: QE designing tests
+- name: dev:implement
+  description: Developer implementing
+- name: dev:code-review
+  description: Code review
+- name: qe:verify
+  description: QE verifying implementation (also used for bug verification)
+- name: arch:sign-off
+  description: Architect sign-off (auto-advance)
+- name: po:merge
+  description: Merge gate (auto-advance)
+- name: bug:investigate
+  description: QE investigating bug, determines simple vs complex, fixes or plans
+- name: arch:review
+  description: Architect reviewing simple bug fix, can approve or escalate
+- name: arch:refine
+  description: Architect reviewing/refining complex bug plan
+- name: bug:breakdown
+  description: Architect creating GitHub native subtasks for complex bug
+- name: bug:in-progress
+  description: Monitoring subtask completion
+- name: sre:infra-setup
+  description: SRE infrastructure setup
+- name: cw:write
+  description: Content writer writing
+- name: cw:review
+  description: Content writer reviewing
+- name: mgr:todo
+  description: Task awaiting team manager
+- name: mgr:in-progress
+  description: Team manager working on task
+- name: mgr:done
+  description: Task completed by team manager
+- name: error
+  description: Issue failed processing 3 times
+projects:
+- name: botminter
+  fork_url: https://github.com/devguyio-bot-squad/botminter.git
+- name: hypershift
+  fork_url: https://github.com/devguyio-bot-squad/hypershift.git
+views:
+- name: PO
+  prefixes:
+  - po
+  also_include:
+  - done
+  - error
+- name: Architect
+  prefixes:
+  - arch
+  also_include:
+  - done
+  - error
+- name: Developer
+  prefixes:
+  - dev
+  also_include:
+  - done
+  - error
+- name: QE
+  prefixes:
+  - qe
+  also_include:
+  - done
+  - error
+- name: Bug
+  prefixes:
+  - bug
+  also_include:
+  - done
+  - error
+- name: Lead
+  prefixes:
+  - lead
+  also_include:
+  - done
+  - error
+- name: Specialist
+  prefixes:
+  - sre
+  - cw
+  also_include:
+  - done
+  - error
+- name: Manager
+  prefixes:
+  - mgr
+  also_include:
+  - done
+  - error
+coding_agents:
+  claude-code:
+    name: claude-code
+    display_name: Claude Code
+    context_file: CLAUDE.md
+    agent_dir: '.claude'
+    binary: claude
+default_coding_agent: claude-code
+bridges:
+- name: tuwunel
+  display_name: Matrix (Tuwunel)
+  description: Matrix bridge via Tuwunel homeserver (local Podman container)
+  type: local
+- name: telegram
+  display_name: Telegram
+  description: Telegram Bot API for team communication
+  type: external
+bridge: tuwunel
+operator:
+  bridge_username: bmadmin

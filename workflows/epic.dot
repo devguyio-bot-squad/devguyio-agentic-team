@@ -1,0 +1,80 @@
+// Epic workflow state machine
+// Statuses: po:triage, po:backlog, arch:design, lead:design-review, po:design-review,
+//           arch:plan, lead:plan-review, po:plan-review, arch:breakdown,
+//           lead:breakdown-review, po:ready, arch:in-progress, po:accept, done
+
+digraph epic {
+    rankdir=LR;
+    graph [fontname="Helvetica", bgcolor="transparent"];
+    node [fontname="Helvetica", style="filled", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // --- Role colors ---
+    // PO (amber)
+    node [fillcolor="#FCD34D", color="#B45309"];
+    "po:triage";
+    "po:backlog";
+    "po:ready";
+
+    // PO gates (amber, octagon = human decision)
+    node [fillcolor="#FCD34D", color="#B45309", shape=octagon];
+    "po:design-review" [label="po:design-review\n(GATE)"];
+    "po:plan-review" [label="po:plan-review\n(GATE)"];
+    "po:accept" [label="po:accept\n(GATE)"];
+
+    // Architect (indigo)
+    node [fillcolor="#A5B4FC", color="#4338CA", shape=box];
+    "arch:design";
+    "arch:plan";
+    "arch:breakdown";
+    "arch:in-progress";
+
+    // Lead (purple)
+    node [fillcolor="#C4B5FD", color="#6D28D9", shape=box];
+    "lead:design-review";
+    "lead:plan-review";
+    "lead:breakdown-review";
+
+    // Terminal (done)
+    node [fillcolor="#D1D5DB", color="#374151", shape=doublecircle];
+    "done";
+
+    // Error
+    node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
+    "error";
+
+    // --- Happy path transitions ---
+    "po:triage" -> "po:backlog" [label="accept"];
+    "po:backlog" -> "arch:design" [label="activate"];
+    "arch:design" -> "lead:design-review" [label="submit"];
+    "lead:design-review" -> "po:design-review" [label="approved"];
+    "po:design-review" -> "arch:plan" [label="approved"];
+    "arch:plan" -> "lead:plan-review" [label="submit"];
+    "lead:plan-review" -> "po:plan-review" [label="approved"];
+    "po:plan-review" -> "arch:breakdown" [label="approved"];
+    "arch:breakdown" -> "lead:breakdown-review" [label="submit"];
+    "lead:breakdown-review" -> "po:ready" [label="approved"];
+    "po:ready" -> "arch:in-progress" [label="activate"];
+    "arch:in-progress" -> "po:accept" [label="stories done"];
+    "po:accept" -> "done" [label="approved"];
+
+    // --- Rejection loops (dashed red) ---
+    "po:design-review" -> "arch:design" [label="rejected", style=dashed, color="#DC2626", fontcolor="#DC2626"];
+    "po:plan-review" -> "arch:plan" [label="rejected", style=dashed, color="#DC2626", fontcolor="#DC2626"];
+    "po:accept" -> "arch:in-progress" [label="rejected", style=dashed, color="#DC2626", fontcolor="#DC2626"];
+
+    // --- Error transitions (any non-terminal -> error) ---
+    "po:triage" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:backlog" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:design" -> "error" [style=dotted, color="#9CA3AF"];
+    "lead:design-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:design-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:plan" -> "error" [style=dotted, color="#9CA3AF"];
+    "lead:plan-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:plan-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:breakdown" -> "error" [style=dotted, color="#9CA3AF"];
+    "lead:breakdown-review" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:ready" -> "error" [style=dotted, color="#9CA3AF"];
+    "arch:in-progress" -> "error" [style=dotted, color="#9CA3AF"];
+    "po:accept" -> "error" [style=dotted, color="#9CA3AF"];
+}
