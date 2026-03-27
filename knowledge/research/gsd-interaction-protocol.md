@@ -389,9 +389,9 @@ All three tiers share the same init infrastructure (`gsd-tools init`) and file-b
 
 ---
 
-## Implications for BotMinter
+## Key Takeaways
 
-The GSD interaction protocol suggests a general pattern for CLI-agent coordination:
+The GSD interaction protocol demonstrates a general pattern for CLI-agent coordination:
 
 1. **The CLI owns state and sequencing.** It decides what to do, assembles context, and processes results. The agent never manages workflow state.
 
@@ -404,50 +404,3 @@ The GSD interaction protocol suggests a general pattern for CLI-agent coordinati
 5. **Verification is separate from execution.** The agent that writes code is not the agent that verifies it. Different context, different tools, different constraints.
 
 6. **Tool scoping enforces the boundary.** The CLI doesn't trust the agent to stay in its lane — it restricts the available tools at spawn time.
-
-For BotMinter's formation contracts (ADR-0012), the GSD pattern applies but adapted for BotMinter's interactive model. Minty is a **conversational assistant** (chat with system prompt + tools), not a headless agent. The structured-prompt pattern appears at two points:
-
-```mermaid
-sequenceDiagram
-    participant Op as Operator
-    participant BM as bm CLI
-    participant Minty as Minty (interactive chat)
-    participant Agent as bm-agent CLI
-    participant Env as Environment
-
-    Op->>BM: bm env create
-    Note over BM,Minty: Step 1: Launch with structured prompt
-    BM->>BM: Assemble structured document (contract, context)
-    BM->>Minty: Launch chat with structured prompt
-    Note over Minty: Minty opens as interactive chat
-
-    Minty->>Op: "Hi! I see you want to create an environment..."
-    Op->>Minty: Conversational context (what env, preferences, etc.)
-    Minty->>Op: "Got it, here's what I'll do..."
-
-    Note over Minty,Agent: Step 2: Execution via bm-agent
-    Minty->>Agent: bm-agent env setup
-    Agent->>Agent: Assemble structured context (contract.yml, state)
-    Agent-->>Minty: Structured prompt (dependencies, truths, checks)
-    Minty->>Env: Provision (install, configure, verify per dependency)
-    Minty->>Agent: bm-agent env check
-    Agent->>Env: Deterministic verification
-    Env-->>Agent: Pass / Fail
-    Agent-->>Minty: Result
-    Minty->>Op: "Environment ready!"
-```
-
-### Two structured-prompt handoffs
-
-1. **`bm` → Minty** (launch): The operator CLI assembles a structured document (formation contract, environment context) and launches Minty with it as the system prompt. This is the same structured-document-as-prompt pattern from GSD, generalized — already in use in the brain system.
-
-2. **Minty → `bm-agent` → Minty** (execution): During the conversational phase, Minty decides to execute. It calls `bm-agent` CLI commands, which assemble structured context from the formation contract and feed it back. This is the GSD five-step handshake applied within BotMinter.
-
-### Key differences from GSD
-
-| Aspect | GSD | BotMinter |
-|--------|-----|-----------|
-| Agent interaction | Headless — single prompt, no conversation | Interactive — Minty chats with operator before executing |
-| CLI surfaces | One (`gsd-tools`) | Two: `bm` (operator-facing), `bm-agent` (agent-facing) |
-| When structured prompts appear | At agent spawn | At launch (bm → Minty) AND during execution (bm-agent → Minty) |
-| Structured documents | Domain-specific (PLAN.md) | Generic pattern being generalized across the system |
