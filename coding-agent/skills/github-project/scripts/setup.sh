@@ -33,10 +33,24 @@ if [ "${SETUP_MODE:-}" = "minimal" ]; then
   return 0 2>/dev/null || exit 0
 fi
 
-# Get project number with error checking
-PROJECT_NUM=$(gh project list --owner "$OWNER" --format json 2>&1 | jq -r '.projects[0].number')
-if [ -z "$PROJECT_NUM" ] || [ "$PROJECT_NUM" = "null" ]; then
-  echo "❌ ERROR: No GitHub Project found for organization: $OWNER"
+# Get project number from ~/.botminter/config.yml (set by bm init).
+# Matches the team entry whose github_repo equals TEAM_REPO.
+BM_CONFIG="$HOME/.botminter/config.yml"
+PROJECT_NUM=""
+if [ -f "$BM_CONFIG" ]; then
+  # Simple YAML extraction: find the team block matching github_repo, then read project_number.
+  # Uses awk to avoid python/PyYAML dependency.
+  PROJECT_NUM=$(awk -v repo="$TEAM_REPO" '
+    /^- name:/ || /^  - name:/ { in_team=1; found_repo=0; pn="" }
+    in_team && /github_repo:/ && $0 ~ repo { found_repo=1 }
+    in_team && /project_number:/ { pn=$2 }
+    in_team && found_repo && pn { print pn; exit }
+  ' "$BM_CONFIG" 2>/dev/null)
+fi
+
+if [ -z "$PROJECT_NUM" ]; then
+  echo "❌ ERROR: No project_number found in $BM_CONFIG for team repo: $TEAM_REPO"
+  echo "Ensure 'bm init' was run and project_number is set in config.yml"
   exit 1
 fi
 
