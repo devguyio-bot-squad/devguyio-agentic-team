@@ -11,16 +11,28 @@ How [GSD](https://github.com/gsd-build/get-shit-done) coordinates between determ
 
 Every GSD operation follows the same interaction protocol:
 
-```
-┌──────────────────┐     structured      ┌──────────────────┐
-│  CLI (deterministic) │ ──── prompt ────▶ │  Agent (AI reasoning) │
-│                  │                     │                  │
-│  - loads state   │     file-system     │  - reasons       │
-│  - assembles     │ ◀── artifacts ───── │  - creates       │
-│    context       │                     │  - writes files  │
-│  - scopes tools  │                     │  - makes commits │
-│  - updates state │                     │                  │
-└──────────────────┘                     └──────────────────┘
+```mermaid
+graph LR
+    CLI["CLI<br/>(deterministic)"]
+    Agent["Agent<br/>(AI reasoning)"]
+
+    CLI -- "structured prompt<br/>(markdown + YAML)" --> Agent
+    Agent -- "file-system artifacts<br/>(markdown, code, commits)" --> CLI
+
+    subgraph CLI Responsibilities
+        direction TB
+        C1[Load state]
+        C2[Assemble context]
+        C3[Scope tools]
+        C4[Update state]
+    end
+
+    subgraph Agent Responsibilities
+        direction TB
+        A1[Reason about content]
+        A2[Write code / docs]
+        A3[Make git commits]
+    end
 ```
 
 The CLI never reasons about content. The agent never manages state. Structured markdown documents are how they talk to each other. This is the same pattern whether the operation is code execution, project planning, research, verification, or milestone creation.
@@ -30,6 +42,24 @@ The CLI never reasons about content. The agent never manages state. Structured m
 ## The Five-Step Handshake
 
 Every workflow that involves AI reasoning follows these steps:
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI (deterministic)
+    participant FS as File System
+    participant Agent as Agent (AI)
+
+    CLI->>FS: gsd-tools init <workflow>
+    FS-->>CLI: JSON blob (paths, config, models)
+    CLI->>CLI: Assemble structured prompt
+    CLI->>Agent: Task(prompt, tools, model)
+    Note over Agent: Fresh context window
+    Agent->>FS: Write artifacts (SUMMARY.md, code, commits)
+    Agent-->>CLI: Return
+    CLI->>FS: Read agent outputs
+    CLI->>FS: Update STATE.md, ROADMAP.md
+    CLI->>CLI: Route to next step
+```
 
 ### Step 1: Deterministic Init
 
@@ -90,6 +120,21 @@ The CLI reads the agent's outputs from the file system, updates state files, and
 
 ### Project Creation (`new-project`)
 
+```mermaid
+graph TD
+    I[CLI: Gather project info, write PROJECT.md] --> R
+    R[Spawn: 4x project-researcher in parallel] --> S
+    S[Spawn: research-synthesizer] --> M
+    M[Spawn: roadmapper] --> F
+    F[CLI: Present for approval, commit, write STATE.md]
+
+    style I fill:#e1f5fe
+    style F fill:#e1f5fe
+    style R fill:#fff3e0
+    style S fill:#fff3e0
+    style M fill:#fff3e0
+```
+
 | Step | What Happens |
 |------|-------------|
 | **CLI** | Gathers project info interactively, writes PROJECT.md, resolves models |
@@ -119,6 +164,26 @@ The CLI reads the agent's outputs from the file system, updates state files, and
 | **CLI** | Commits plans, suggests next step |
 
 ### Code Execution (`execute-phase`)
+
+```mermaid
+graph TD
+    D[CLI: Discover plans, group by wave, create branch] --> W1
+    W1[Wave 1: Parallel executors in worktrees] --> W2
+    W2[Wave 2: Parallel executors in worktrees] --> V
+    V[Spawn: verifier checks must_haves] --> Check{Passed?}
+    Check -->|passed| Advance[CLI: Advance phase]
+    Check -->|gaps_found| Fix[CLI: Generate fix plans]
+    Fix --> W1
+    Check -->|human_needed| Human[CLI: Request human review]
+
+    style D fill:#e1f5fe
+    style Advance fill:#e1f5fe
+    style Fix fill:#e1f5fe
+    style Human fill:#e1f5fe
+    style W1 fill:#fff3e0
+    style W2 fill:#fff3e0
+    style V fill:#fff3e0
+```
 
 | Step | What Happens |
 |------|-------------|
@@ -201,6 +266,29 @@ These still follow the pattern of "CLI loads context deterministically, then wor
 ## The Structured Document as Protocol
 
 The key insight is that **structured markdown documents are the protocol boundary**. The CLI produces them, agents consume them, and agents produce them for the CLI to consume.
+
+```mermaid
+graph LR
+    subgraph "CLI → Agent"
+        P1[PLAN.md] --> Agent
+        P2[Structured XML prompt] --> Agent
+        P3[Context files] --> Agent
+    end
+
+    subgraph "Agent → CLI"
+        Agent --> A1[SUMMARY.md]
+        Agent --> A2[VERIFICATION.md]
+        Agent --> A3[RESEARCH.md]
+        Agent --> A4[ROADMAP.md]
+        Agent --> A5[Git commits]
+    end
+
+    subgraph "Contract travels through"
+        must_haves["must_haves<br/>(truths + artifacts + key_links)"]
+        must_haves -.-> P1
+        must_haves -.-> A2
+    end
+```
 
 ### CLI → Agent (Prompts)
 
@@ -317,4 +405,23 @@ The GSD interaction protocol suggests a general pattern for CLI-agent coordinati
 
 6. **Tool scoping enforces the boundary.** The CLI doesn't trust the agent to stay in its lane — it restricts the available tools at spawn time.
 
-For BotMinter's formation contracts (ADR-0012), the applicable pattern is: `bm env create` (CLI) assembles the formation contract into a structured prompt → spawns Minty with scoped tools → Minty provisions the environment → `bm env check` (CLI) deterministically verifies the result. The contract.yml is both the specification and the prompt.
+For BotMinter's formation contracts (ADR-0012), the applicable pattern is:
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant CLI as bm CLI
+    participant Minty as Minty (AI)
+    participant Env as Environment
+
+    Op->>CLI: bm env create
+    CLI->>CLI: Read contract.yml
+    CLI->>Minty: Spawn with contract as prompt + scoped tools
+    Minty->>Env: Install dependencies, configure services
+    Minty-->>CLI: Return
+    CLI->>Env: bm env check (deterministic verification)
+    Env-->>CLI: Pass / Fail
+    CLI-->>Op: Environment ready
+```
+
+`bm env create` (CLI) assembles the formation contract into a structured prompt → spawns Minty with scoped tools → Minty provisions the environment → `bm env check` (CLI) deterministically verifies the result. The contract.yml is both the specification and the prompt.
