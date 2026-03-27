@@ -39,9 +39,54 @@ The CLI never reasons about content. The agent never manages state. Structured m
 
 ---
 
-## The Five-Step Handshake
+## The Command Layer: Conversational Entry Point
 
-Every workflow that involves AI reasoning follows these steps:
+The user's entry point to GSD is a **slash command** — `/gsd:plan-phase`, `/gsd:quick`, `/gsd:new-project`, etc. Each command is a `.md` file (YAML frontmatter + prompt body) that lives in `commands/gsd/`. When the user types a command, the markdown file gets injected into the **user's active coding agent session** — it becomes part of the conversation.
+
+This means the interaction is **conversational from the start**. The command's markdown tells the agent what workflow to run, but the agent is still in a chat session with the user. Some workflows are interactive (like `discuss-phase`, which asks the user questions), some gather info conversationally before spawning headless subagents.
+
+```mermaid
+graph TD
+    User["User types /gsd:plan-phase 01"] --> Cmd
+    Cmd["Command .md injected into conversation"] --> Workflow
+    Workflow["Workflow runs in conversation context"]
+    Workflow --> Interactive["Interactive steps<br/>(Q&A with user)"]
+    Workflow --> Init["gsd-tools init<br/>(deterministic context)"]
+    Init --> Spawn["Task() spawn<br/>(headless subagent)"]
+    Spawn --> Result["Agent writes artifacts"]
+    Result --> Post["CLI post-processes<br/>(update state, route next)"]
+
+    style Cmd fill:#e8f5e9
+    style Interactive fill:#e8f5e9
+    style Init fill:#e1f5fe
+    style Post fill:#e1f5fe
+    style Spawn fill:#fff3e0
+```
+
+The command `.md` file has YAML frontmatter specifying metadata (name, description, allowed tools) and a prompt body containing the workflow logic. The command IS a structured document — the first structured prompt in the chain.
+
+```yaml
+# Example: commands/gsd/plan-phase.md
+---
+name: plan-phase
+description: "Create execution plans for a development phase"
+allowed-tools: [Read, Write, Bash, Grep, Glob, Task]
+---
+
+<workflow body — instructions for the agent>
+```
+
+This is important because the distinction isn't "CLI is deterministic, agent is headless." The distinction is:
+- **Commands** are structured documents injected into a conversational session
+- **Workflows** orchestrate within that session — some steps are interactive, some spawn headless subagents
+- **`gsd-tools.cjs`** provides deterministic operations that both the conversational agent and headless subagents can call
+- **Subagents** (spawned via `Task()`) are the only truly headless part — they get a fresh context, do work, and return
+
+---
+
+## The Five-Step Handshake (Within Workflows)
+
+Once a command triggers a workflow, the workflow follows these steps for any operation that needs a headless subagent:
 
 ```mermaid
 sequenceDiagram
@@ -244,9 +289,9 @@ graph TD
 
 ---
 
-## Lightweight Operations (No Agent Spawn)
+## Inline Operations (Conversational, No Subagent Spawn)
 
-Some operations use the same init infrastructure for context loading but execute inline without spawning a subagent:
+Some operations run entirely within the user's conversation — no headless subagent spawned. The command `.md` gets injected, the workflow loads context via `gsd-tools init`, and the work happens interactively:
 
 | Operation | What It Does |
 |-----------|-------------|
@@ -259,7 +304,7 @@ Some operations use the same init infrastructure for context loading but execute
 | `note` | Simple file append/list/promote |
 | `do` | Intent dispatcher — routes freeform text to appropriate workflow |
 
-These still follow the pattern of "CLI loads context deterministically, then work happens" — the difference is the work happens in the current context rather than a spawned agent.
+These still follow the pattern of "CLI loads context deterministically, then work happens" — the difference is the work happens in the user's conversation rather than in a headless subagent. The agent can ask the user questions, show progress, and get feedback — all within the same chat session that the `/gsd:*` command was issued in.
 
 ---
 
@@ -381,11 +426,11 @@ Researchers can search the web but can't write source files. Verifiers are read-
 
 | Tier | Count | Pattern | Examples |
 |------|-------|---------|----------|
-| Agent-spawning | 7/19 | Full init → prompt → Task() → post-process | plan-phase, execute-phase, verify-phase, new-project, research, map-codebase, quick |
-| Inline | 10/19 | Init for context, work in current context | discuss, ship, progress, transition, fast, note, milestone-complete |
-| Orchestrator | 2/19 | Multi-agent coordination with state routing | autonomous (chains all phases), execute-phase (wave parallelism) |
+| Agent-spawning | 7/19 | Conversational entry → init → Task() spawn → post-process | plan-phase, execute-phase, verify-phase, new-project, research, map-codebase, quick |
+| Inline (conversational) | 10/19 | Conversational entry → init → work in user's chat session | discuss, ship, progress, transition, fast, note, milestone-complete |
+| Orchestrator | 2/19 | Conversational entry → multi-agent coordination | autonomous (chains all phases), execute-phase (wave parallelism) |
 
-All three tiers share the same init infrastructure (`gsd-tools init`) and file-based state model. The difference is how the AI work gets dispatched.
+All three tiers start with a **command `.md` injected into the user's conversation**. They all share the same init infrastructure (`gsd-tools init`) and file-based state model. The difference is whether the heavy work happens in the user's chat session (inline) or in headless subagents (spawned).
 
 ---
 
