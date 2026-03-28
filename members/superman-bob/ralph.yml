@@ -727,23 +727,29 @@ hats:
          - Bug with no sub-issues → simple bug verification
          - Bug with sub-issues → complex bug verification
       4. Read the test plan comment (from QE test designer, if present).
-      5. Run tests, check coverage.
-      6. Verify the implementation against each acceptance criterion.
+      5. **Verify PR exists and is approved:**
+         - Find the PR: `gh pr list --search "<issue-number>"` or check issue comments for a linked PR.
+         - Confirm the PR review state is APPROVED: `gh pr view <pr-number> --json reviewDecision`.
+         - If no PR exists or the PR is not approved, verification fails — status stays at `qe:verify`.
+      6. Run tests, check coverage (on the PR branch if applicable).
+      7. Verify the implementation against each acceptance criterion.
 
       ### If verification passes (by issue type):
 
       **Task (story):**
+      - Confirm PR is ready for merge (approved, tests pass, no conflicts).
       - Set status to `arch:sign-off` (auto-advances: `arch:sign-off` → `po:merge` → `done`).
-      - Append verification report comment. Publish `qe.approved`.
+      - Append verification report comment (include PR number and approval state). Publish `qe.approved`.
 
       **Bug:**
+      - Confirm PR exists and is approved before advancing.
       - Set status to `done`. Close the issue using the close-reopen operation.
-      - Append verification report comment. Publish `qe.approved`.
+      - Append verification report comment (include PR number and approval state). Publish `qe.approved`.
 
       ### If verification fails (by issue type):
 
       **Task (story):**
-      - Set status to `dev:implement`. Append feedback. Publish `qe.rejected`.
+      - Set status to `dev:implement`. Append feedback (include PR issues if any). Publish `qe.rejected`.
 
       **Bug (simple — no sub-issues):**
       - Set status to `bug:investigate`. Append feedback. Publish `qe.rejected`.
