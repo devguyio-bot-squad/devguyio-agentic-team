@@ -567,8 +567,13 @@ hats:
          - How to test (test approach, tools)
          - Expected results
       6. Write test stubs/skeletons in the project repo (`./`) if applicable.
-      7. Set the story's project status to `dev:implement` via item-edit.
-      8. Publish `dev.implement` (direct chain to dev_implementer).
+      7. **Create branch and draft PR** (if test stubs were written):
+         - Create branch: `feature/story-<issue-number>-<description>`
+         - Commit test stubs to the branch
+         - Push the branch and open a draft PR:
+           `gh pr create --draft --title "[#<issue-number>] <description>" --body "Refs #<issue-number>"`
+      8. Set the story's project status to `dev:implement` via item-edit.
+      9. Publish `dev.implement` (direct chain to dev_implementer).
 
       ### Comment Format
       Use `### 🧪 qe — <ISO-timestamp>` for all comments.
@@ -615,7 +620,11 @@ hats:
          `🧪 qe` (QE verifier) with feedback. Address all concerns.
       5. Implement the story in the project repo (`./`).
       6. Ensure tests pass (run test suite).
-      7. Create a branch, commit changes.
+      7. **Branch and PR handling:**
+         - If a draft PR already exists (from QE test designer): push commits to the existing branch.
+         - If no PR exists: create branch `feature/story-<issue-number>-<description>`, commit, push,
+           and open a PR: `gh pr create --title "[#<issue-number>] <description>" --body "Refs #<issue-number>"`
+         - Mark any draft PR as ready: `gh pr ready`
       8. Set the story's project status to `dev:code-review` (use the `status-workflow` skill).
       9. Publish `dev.code_review` (direct chain to dev_code_reviewer).
 
@@ -920,7 +929,8 @@ hats:
       5. **For SIMPLE bugs:**
          - Implement the fix in the project repo (`./`)
          - Run tests to verify fix
-         - Commit to a feature branch
+         - Create branch `feature/bug-<issue-number>-<description>`, commit, push
+         - Open a PR: `gh pr create --title "[#<issue-number>] <description>" --body "Fixes #<issue-number>"`
          - Add comment documenting reproduction + fix
          - Set status to `arch:review` via item-edit
          - Publish `arch.review`
