@@ -55,7 +55,7 @@ STATUS_FIELD_ID=$(echo "$FIELD_DATA" | jq -r '.fields[] | select(.name=="Status"
 ### 5. Query the project board
 
 ```bash
-gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json
+gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000
 ```
 
 Parse the JSON to extract items with their Status field values.
@@ -76,7 +76,7 @@ Before dispatching, handle auto-advance statuses. Use the cached IDs to
 transition statuses via `gh project item-edit`:
 
 ```bash
-ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
   --jq ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 OPTION_ID=$(echo "$FIELD_DATA" | jq -r '.fields[] | select(.name=="Status") | .options[] | select(.name=="<target-status>") | .id')
 gh project item-edit --project-id "$PROJECT_ID" --id "$ITEM_ID" \
