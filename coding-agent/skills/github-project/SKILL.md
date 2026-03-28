@@ -1,6 +1,6 @@
 ---
 name: github-project
-description: Manages GitHub Projects v2 workflows for issue tracking and project management. Use when user asks to "show the board", "view issues", "what's in [status]", "create an epic", "add a story", "create a bug", "move issue #N to [status]", "transition #N from [status] to [status]", "comment on #N", "create a milestone", "assign #N to [user]", "create a PR", "create a sub-issue", or "review PR #N". Wraps gh CLI with validation and verification.
+description: Manages GitHub Projects v2 workflows for issue tracking and project management. Use when user asks to "show the board", "view issues", "what's in [status]", "create an epic", "add a story", "create a bug", "move issue #N to [status]", "transition #N from [status] to [status]", "comment on #N", "update issue #N", "edit issue #N", "create a milestone", "assign #N to [user]", "create a PR", "create a sub-issue", or "review PR #N". Wraps gh CLI with validation and verification.
 compatibility: "Requires gh CLI (GitHub CLI) with 'project' token scope, GitHub Projects v2, GH_TOKEN environment variable, and read/write access to the team repository. Intended for Claude Code and API usage."
 license: MIT
 metadata:
@@ -193,7 +193,54 @@ bash scripts/add-comment.sh \
 
 ---
 
-### 5. Assign / Unassign
+### 5. Update Issue
+
+**When to use:** User asks to update an issue's title, description/body, or labels.
+
+**What it does:**
+- Updates issue title, body, and/or labels
+- Supports adding and removing labels in a single call
+
+**Parameters:**
+- `--issue` (required) - Issue number
+- `--title` (optional) - New title
+- `--body` (optional) - New body/description (markdown)
+- `--add-label` (optional, repeatable) - Label to add
+- `--remove-label` (optional, repeatable) - Label to remove
+
+At least one of `--title`, `--body`, `--add-label`, or `--remove-label` is required.
+
+**Usage:**
+
+Claude will run:
+```bash
+# Update title
+bash scripts/update-issue.sh \
+  --issue 15 \
+  --title "New title for the issue"
+
+# Update body
+bash scripts/update-issue.sh \
+  --issue 15 \
+  --body "Updated description with more detail..."
+
+# Update labels
+bash scripts/update-issue.sh \
+  --issue 15 \
+  --add-label "role/architect" \
+  --remove-label "role/team-manager"
+
+# Update multiple fields at once
+bash scripts/update-issue.sh \
+  --issue 15 \
+  --title "Revised title" \
+  --body "Revised description" \
+  --add-label "priority/high"
+```
+
+---
+
+### 6. Assign / Unassign
 
 **When to use:** User asks to assign an issue, add assignee, or remove assignee.
 
@@ -225,7 +272,7 @@ bash scripts/assign.sh \
 
 ---
 
-### 6. Milestone Management
+### 7. Milestone Management
 
 **When to use:** User asks to list milestones, create a milestone, or assign issue to milestone.
 
@@ -264,7 +311,7 @@ bash scripts/milestone-ops.sh \
 
 ---
 
-### 7. Close / Reopen Issue
+### 8. Close / Reopen Issue
 
 **When to use:** User asks to close an issue, mark as done, or reopen a closed issue.
 
@@ -289,7 +336,7 @@ bash scripts/close-reopen.sh --issue 15 --action reopen
 
 ---
 
-### 8. PR Operations
+### 9. PR Operations
 
 **When to use:** User asks to create a PR, review PR, approve PR, request changes, or comment on PR.
 
@@ -343,7 +390,7 @@ bash scripts/pr-ops.sh --action list
 
 ---
 
-### 9. Query Issues
+### 10. Query Issues
 
 **When to use:** User asks to find issues by label, status, milestone, assignee, or get a specific issue.
 
@@ -385,7 +432,7 @@ bash scripts/query-issues.sh --type issue-type --label "Bug"
 
 ---
 
-### 10. Sub-Issue Operations (GitHub Native Sub-Issues)
+### 11. Sub-Issue Operations (GitHub Native Sub-Issues)
 
 **When to use:** Creating or managing GitHub native sub-issues (e.g., subtasks for complex bugs, stories under epics).
 
@@ -439,7 +486,7 @@ bash scripts/subtask-ops.sh \
 
 ---
 
-### 11. Status Field Management
+### 12. Status Field Management
 
 **When to use:** Adding, listing, or modifying project status options (e.g., adding new workflow statuses).
 
