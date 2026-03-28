@@ -86,7 +86,36 @@ gh project item-edit --project-id "$PROJECT_ID" --id "$ITEM_ID" \
 Transitions:
 
 - `arch:sign-off` → set status to `po:merge`, comment, log.
-- `po:merge` → set status to `done`, close the issue via `gh issue close`, comment, log.
+- `po:merge` → **human-gated merge** (see below).
+
+#### `po:merge` — Human-Gated Merge
+
+When an issue reaches `po:merge`, the board scanner checks for an associated PR:
+
+```bash
+PR_DATA=$(gh pr list --repo "$TEAM_REPO" --search "<issue-number>" --json number,state,reviewDecision --jq '.[0]')
+```
+
+**Decision tree:**
+
+1. **No PR exists** (non-code issues like process/docs):
+   - Auto-advance to `done`: set status to `done`, close the issue, comment, log.
+
+2. **PR exists and has been merged** (`state == "MERGED"`):
+   - Auto-advance to `done`: set status to `done`, close the issue, comment, log.
+
+3. **PR exists, approved, but not yet merged** (`reviewDecision == "APPROVED"`, `state == "OPEN"`):
+   - Send RObot notification: `"PR #N for issue #M is approved and ready for human merge"`
+   - Keep status at `po:merge` — do NOT advance to `done`.
+   - Do NOT call `gh pr merge`. The human is the sole merge authority.
+   - Log to poll-log: `"po:merge — issue #M waiting for human merge of PR #N"`
+
+4. **PR exists but not yet approved** (`state == "OPEN"`, review not approved):
+   - Keep at `po:merge`, log to poll-log: `"po:merge — issue #M PR #N awaiting review"`
+
+**PR stacking note:** When multiple issues have PRs against main and conflicts
+are expected, instruct hats to stack PRs (base one PR on another's branch).
+Human merges in order.
 
 Comment format for auto-advance:
 
