@@ -342,7 +342,7 @@ Issues are assigned to milestones via the `github-project` skill (milestone-ops 
 
 ## Pull Request Format
 
-Pull requests are real GitHub PRs on the team repo. PRs are used for team evolution (knowledge, invariants, process changes), NOT for code changes.
+Pull requests are real GitHub PRs. PRs on the team repo are used for team evolution (knowledge, invariants, process changes). PRs on the project repo are used for code changes (see [PR Lifecycle for Code Changes](#pr-lifecycle-for-code-changes) below).
 
 **Fields:**
 
