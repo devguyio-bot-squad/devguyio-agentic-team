@@ -4,6 +4,11 @@
 
 set -euo pipefail
 
+# Derive workspace root from script location
+# Scripts live at <workspace>/.claude/skills/github-project/scripts/
+_SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "$_SETUP_DIR/../../../.." && pwd)"
+
 # Verify project scope by testing access
 if ! gh project list --owner "$(gh api user -q .login)" --limit 1 --format json &>/dev/null; then
   echo "❌ ERROR: Missing 'project' scope on GH_TOKEN"
@@ -12,11 +17,11 @@ if ! gh project list --owner "$(gh api user -q .login)" --limit 1 --format json 
 fi
 
 # Detect team repo
-TEAM_REPO=$(cd team && gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
+TEAM_REPO=$(cd "$WORKSPACE_ROOT/team" && gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
 
 # Fallback: extract owner/repo from git remote URL
 if [ -z "$TEAM_REPO" ]; then
-  TEAM_REPO=$(cd team && git remote get-url origin | sed 's|.*github.com[:/]||;s|\.git$||')
+  TEAM_REPO=$(cd "$WORKSPACE_ROOT/team" && git remote get-url origin | sed 's|.*github.com[:/]||;s|\.git$||')
 fi
 
 if [ -z "$TEAM_REPO" ]; then
@@ -83,9 +88,9 @@ if [ -z "$STATUS_FIELD_ID" ] || [ "$STATUS_FIELD_ID" = "null" ]; then
 fi
 
 # Get member identity from .botminter.yml (optional)
-if [ -f .botminter.yml ]; then
-  ROLE=$(grep '^role:' .botminter.yml | awk '{print $2}')
-  EMOJI=$(grep '^comment_emoji:' .botminter.yml | sed 's/comment_emoji: *"//' | sed 's/"$//')
+if [ -f "$WORKSPACE_ROOT/.botminter.yml" ]; then
+  ROLE=$(grep '^role:' "$WORKSPACE_ROOT/.botminter.yml" | awk '{print $2}')
+  EMOJI=$(grep '^comment_emoji:' "$WORKSPACE_ROOT/.botminter.yml" | sed 's/comment_emoji: *"//' | sed 's/"$//')
 else
   ROLE="superman"
   EMOJI="🦸"
@@ -94,4 +99,4 @@ fi
 echo "✓ Setup complete: $TEAM_REPO, project #$PROJECT_NUM"
 
 # Export variables for use in calling scripts
-export TEAM_REPO OWNER PROJECT_NUM PROJECT_ID FIELD_DATA STATUS_FIELD_ID ROLE EMOJI
+export TEAM_REPO OWNER PROJECT_NUM PROJECT_ID FIELD_DATA STATUS_FIELD_ID ROLE EMOJI WORKSPACE_ROOT

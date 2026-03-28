@@ -57,7 +57,7 @@ if [ -z "$OPTION_ID" ] || [ "$OPTION_ID" = "null" ]; then
 fi
 
 # Get item ID for the issue with validation
-ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json 2>&1 \
+ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 2>&1 \
   | jq -r ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 
 if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then
@@ -70,7 +70,7 @@ if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then
 
   # Retry getting the item ID
   sleep 2
-  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json 2>&1 \
+  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 2>&1 \
     | jq -r ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 
   if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then

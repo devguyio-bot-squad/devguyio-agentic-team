@@ -196,7 +196,7 @@ fi
 sleep 2
 
 # Get the item ID for the newly added issue with validation
-ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json 2>&1 \
+ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 2>&1 \
   | jq -r ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 
 if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then
