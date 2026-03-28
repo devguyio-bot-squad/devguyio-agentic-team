@@ -74,7 +74,7 @@ case "$QUERY_TYPE" in
     if [ -f "$BOARD_CACHE" ]; then
       jq --arg s "$STATUS" '.items[] | select(.status == $s)' "$BOARD_CACHE"
     else
-      gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+      gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
         | jq --arg s "$STATUS" '.items[] | select(.status == $s)'
     fi
     ;;
