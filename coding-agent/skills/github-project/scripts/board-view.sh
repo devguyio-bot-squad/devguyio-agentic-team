@@ -6,4 +6,4 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/setup.sh"
 
 # Fetch all project items
-gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json
+gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000
