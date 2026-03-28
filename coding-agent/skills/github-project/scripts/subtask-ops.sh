@@ -68,20 +68,24 @@ case "$ACTION" in
       exit 1
     fi
 
-    # Get repo ID
-    echo "Fetching repository ID..." >&2
-    REPO_ID=$(gh api graphql \
-      -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
-      -f query='query($owner: String!, $repo: String!) {
-        repository(owner: $owner, name: $repo) { id }
-      }' -q .data.repository.id)
-
+    # Get repo ID (cached — immutable)
+    REPO_ID=$(_cache_get "$CACHE_DIR/repo_id" "$TTL_IMMUTABLE" 2>/dev/null || true)
     if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
-      echo "Error: Could not fetch repository ID" >&2
-      exit 1
+      echo "Fetching repository ID..." >&2
+      REPO_ID=$(gh api graphql \
+        -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
+        -f query='query($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) { id }
+        }' -q .data.repository.id)
+
+      if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+        echo "Error: Could not fetch repository ID" >&2
+        exit 1
+      fi
+      _cache_set "$CACHE_DIR/repo_id" "$REPO_ID"
     fi
 
-    # Get parent issue node ID
+    # Get parent issue node ID (not cached — different parents each call)
     echo "Fetching parent issue #$PARENT node ID..." >&2
     PARENT_ID=$(gh api graphql \
       -f owner="$OWNER_NAME" -f repo="$REPO_NAME" -F number="$PARENT" \
@@ -96,29 +100,32 @@ case "$ACTION" in
       exit 1
     fi
 
-    # Get issue type ID by name
-    echo "Resolving issue type '$TYPE'..." >&2
-    TYPE_ID=$(gh api graphql \
-      -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
-      -H "GraphQL-Features: issue_types" \
-      -f query='query($owner: String!, $repo: String!) {
-        repository(owner: $owner, name: $repo) {
-          issueTypes(first: 20) {
-            nodes { id name }
-          }
-        }
-      }' -q ".data.repository.issueTypes.nodes[] | select(.name == \"$TYPE\") | .id")
-
-    if [ -z "$TYPE_ID" ] || [ "$TYPE_ID" = "null" ]; then
-      echo "Error: Issue type '$TYPE' not found. Available types:" >&2
-      gh api graphql \
+    # Get issue type ID by name (cached — rarely changes)
+    ISSUE_TYPES_JSON=$(_cache_get "$CACHE_DIR/issue_types" "$TTL_IMMUTABLE" 2>/dev/null || true)
+    if [ -z "$ISSUE_TYPES_JSON" ]; then
+      echo "Fetching issue types..." >&2
+      ISSUE_TYPES_JSON=$(gh api graphql \
         -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
         -H "GraphQL-Features: issue_types" \
         -f query='query($owner: String!, $repo: String!) {
           repository(owner: $owner, name: $repo) {
-            issueTypes(first: 20) { nodes { name } }
+            issueTypes(first: 20) {
+              nodes { id name }
+            }
           }
-        }' -q '.data.repository.issueTypes.nodes[].name' >&2
+        }' -q '.data.repository.issueTypes.nodes')
+
+      if [ -z "$ISSUE_TYPES_JSON" ] || [ "$ISSUE_TYPES_JSON" = "null" ]; then
+        echo "Error: Could not fetch issue types" >&2
+        exit 1
+      fi
+      _cache_set "$CACHE_DIR/issue_types" "$ISSUE_TYPES_JSON"
+    fi
+
+    TYPE_ID=$(echo "$ISSUE_TYPES_JSON" | jq -r ".[] | select(.name == \"$TYPE\") | .id")
+    if [ -z "$TYPE_ID" ] || [ "$TYPE_ID" = "null" ]; then
+      echo "Error: Issue type '$TYPE' not found. Available types:" >&2
+      echo "$ISSUE_TYPES_JSON" | jq -r '.[].name' >&2
       exit 1
     fi
 

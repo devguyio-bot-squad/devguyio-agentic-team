@@ -84,32 +84,46 @@ esac
 OWNER_NAME=$(echo "$TEAM_REPO" | cut -d/ -f1)
 REPO_NAME=$(echo "$TEAM_REPO" | cut -d/ -f2)
 
-# Get repo ID
-echo "→ Fetching repository ID..." >&2
-REPO_ID=$(gh api graphql \
-  -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
-  -f query='query($owner: String!, $repo: String!) {
-    repository(owner: $owner, name: $repo) { id }
-  }' -q .data.repository.id)
-
+# Get repo ID (cached — immutable)
+REPO_ID=$(_cache_get "$CACHE_DIR/repo_id" "$TTL_IMMUTABLE" 2>/dev/null || true)
 if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
-  echo "❌ ERROR: Could not fetch repository ID" >&2
-  exit 1
+  echo "→ Fetching repository ID..." >&2
+  REPO_ID=$(gh api graphql \
+    -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
+    -f query='query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) { id }
+    }' -q .data.repository.id)
+
+  if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+    echo "❌ ERROR: Could not fetch repository ID" >&2
+    exit 1
+  fi
+  _cache_set "$CACHE_DIR/repo_id" "$REPO_ID"
 fi
 
-# Get issue type ID
-echo "→ Resolving issue type '$ISSUE_TYPE_NAME'..." >&2
-ISSUE_TYPE_ID=$(gh api graphql \
-  -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
-  -H "GraphQL-Features: issue_types" \
-  -f query='query($owner: String!, $repo: String!) {
-    repository(owner: $owner, name: $repo) {
-      issueTypes(first: 20) {
-        nodes { id name }
+# Get issue type ID (cached — rarely changes)
+ISSUE_TYPES_JSON=$(_cache_get "$CACHE_DIR/issue_types" "$TTL_IMMUTABLE" 2>/dev/null || true)
+if [ -z "$ISSUE_TYPES_JSON" ]; then
+  echo "→ Fetching issue types..." >&2
+  ISSUE_TYPES_JSON=$(gh api graphql \
+    -f owner="$OWNER_NAME" -f repo="$REPO_NAME" \
+    -H "GraphQL-Features: issue_types" \
+    -f query='query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        issueTypes(first: 20) {
+          nodes { id name }
+        }
       }
-    }
-  }' -q ".data.repository.issueTypes.nodes[] | select(.name == \"$ISSUE_TYPE_NAME\") | .id")
+    }' -q '.data.repository.issueTypes.nodes')
 
+  if [ -z "$ISSUE_TYPES_JSON" ] || [ "$ISSUE_TYPES_JSON" = "null" ]; then
+    echo "❌ ERROR: Could not fetch issue types" >&2
+    exit 1
+  fi
+  _cache_set "$CACHE_DIR/issue_types" "$ISSUE_TYPES_JSON"
+fi
+
+ISSUE_TYPE_ID=$(echo "$ISSUE_TYPES_JSON" | jq -r ".[] | select(.name == \"$ISSUE_TYPE_NAME\") | .id")
 if [ -z "$ISSUE_TYPE_ID" ] || [ "$ISSUE_TYPE_ID" = "null" ]; then
   echo "❌ ERROR: '$ISSUE_TYPE_NAME' issue type not found on this repository" >&2
   exit 1

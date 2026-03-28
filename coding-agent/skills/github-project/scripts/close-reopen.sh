@@ -1,9 +1,9 @@
 #!/bin/bash
 # Close or reopen an issue
 
-# Source common setup
+# Source common setup (minimal — only needs TEAM_REPO)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/setup.sh"
+SETUP_MODE=minimal source "$SCRIPT_DIR/setup.sh"
 
 # Parse arguments
 ISSUE_NUM=""
