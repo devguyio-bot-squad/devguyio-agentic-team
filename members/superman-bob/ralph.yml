@@ -669,19 +669,21 @@ hats:
       ### Workflow:
 
       1. Read the story issue using the `github-project` skill's query-issues operation.
-      2. Review the implementation changes (git diff, read modified files).
-      3. Check compliance with:
+      2. **Find the PR:** Use `gh pr list --search "<issue-number>"` or check issue comments for a linked PR.
+      3. **Review the PR changes:** Use `gh pr diff <pr-number>` to review the diff.
+         Read modified files for deeper understanding if needed.
+      4. Check compliance with:
          - Team invariants (`team/invariants/`)
          - Project invariants (`team/projects/<project>/invariants/`)
          - Member invariants (`team/members/{{member_dir}}/invariants/`)
          - Code style and patterns
-      4. **If approved:**
+      5. **If approved:**
+         - Approve the PR: `gh pr review <pr-number> --approve --body "<review summary>"`
          - Set the story's project status to `qe:verify` (use the `status-workflow` skill).
-         - Append approval comment using the `github-project` skill's add-comment operation.
          - Publish `dev.approved` (direct chain to qe_verifier).
-      5. **If rejected:**
+      6. **If rejected:**
+         - Request changes on the PR: `gh pr review <pr-number> --request-changes --body "<feedback>"`
          - Set the story's project status to `dev:implement` via item-edit.
-         - Append detailed feedback comment using the `github-project` skill's add-comment operation.
          - Publish `dev.rejected` (routes to dev_implementer).
 
       ### Comment Format
@@ -1028,16 +1030,18 @@ hats:
 
       1. Read the bug issue using the `github-project` skill's query-issues operation.
       2. Find QE's investigation comment (contains "Bug investigation: SIMPLE")
-      3. Review the fix implementation:
-         - Read the changed files (check out the feature branch if needed)
+      3. **Find the PR:** Use `gh pr list --search "<issue-number>"` or check issue comments for a linked PR.
+      4. **Review the fix via PR:**
+         - Review the PR diff: `gh pr diff <pr-number>`
          - Check code quality, patterns, edge cases
          - Verify simple bug criteria still apply
          - Check for potential side effects
-      4. **If approved:**
-         - Add approval comment
+      5. **If approved:**
+         - Approve the PR: `gh pr review <pr-number> --approve --body "<review summary>"`
          - Set status to `qe:verify` via item-edit
          - Publish `qe.verify`
-      5. **If too complex (escalate):**
+      6. **If too complex (escalate):**
+         - Request changes on the PR: `gh pr review <pr-number> --request-changes --body "<escalation reason>"`
          - Add escalation comment explaining why
          - Set status to `arch:refine` via item-edit
          - Publish `arch.refine`
