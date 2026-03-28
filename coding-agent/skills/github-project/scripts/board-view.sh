@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/setup.sh"
 
 # Fetch all project items (always fresh)
-BOARD_JSON=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json)
+BOARD_JSON=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000)
 
 # Save to board state cache for intra-cycle reads
 BOARD_CACHE=$(_board_cache_path)
