@@ -50,7 +50,7 @@ STATUS_FIELD_ID=$(echo "$FIELD_DATA" | jq -r '.fields[] | select(.name=="Status"
 
 ```bash
 # Get the project item ID for the issue
-ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
   --jq ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 
 # Get the option ID for the target status
@@ -67,7 +67,7 @@ if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then
   gh project item-add "$PROJECT_NUM" --owner "$OWNER" \
     --url "https://github.com/$TEAM_REPO/issues/$ISSUE_NUM"
   sleep 2
-  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
     --jq ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 fi
 
@@ -132,7 +132,7 @@ Where `ROLE` and `EMOJI` come from `.botminter.yml` in the workspace root.
 Minimal transition (when board-scanner variables are available):
 
 ```bash
-ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
   --jq ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 OPTION_ID=$(echo "$FIELD_DATA" | jq -r \
   '.fields[] | select(.name=="Status") | .options[] | select(.name=="'"$TARGET_STATUS"'") | .id')

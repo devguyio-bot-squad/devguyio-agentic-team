@@ -69,7 +69,7 @@ case "$QUERY_TYPE" in
       exit 1
     fi
 
-    gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+    gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
       --jq ".items[] | select(.status == \"$STATUS\")"
     ;;
 
