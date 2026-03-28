@@ -415,7 +415,7 @@ hats:
       - arch.breakdown
     publishes:
       - lead.review
-      - bug.in_progress
+      - task.resume
       - arch.breakdown.failed
     instructions: |
       ## Breakdown Executor
@@ -465,7 +465,8 @@ hats:
       6. Use the status-transition operation to set each subtask to `dev:implement`.
       7. Use the add-comment operation to comment on the bug listing all created subtask numbers.
       8. Use the status-transition operation to set the bug to `bug:in-progress`.
-      9. Publish `bug.in_progress` (monitor will track subtask completion).
+      9. Publish `task.resume` (returns to board scanner for priority-based dispatch;
+         scanner will prioritize dev:implement subtasks over bug:in-progress monitoring).
 
       ### Backpressure
 

@@ -175,8 +175,8 @@ are responsible for querying the issue type themselves.
 | 2 | `arch:review` | `arch.review` |
 | 3 | `arch:refine` | `arch.refine` |
 | 4 | `bug:breakdown` | `arch.breakdown` |
-| 5 | `bug:in-progress` | `bug.in_progress` |
-| 6 | `qe:verify` | `qe.verify` |
+| 5 | `qe:verify` | `qe.verify` |
+| 6 | `bug:in-progress` | `bug.in_progress` |
 
 Note: `po:plan-review` and `qe:verify` are shared with Epic/Story tables. Bugs at these statuses are dispatched to the same hats, which query the issue type to determine the correct path.
 
