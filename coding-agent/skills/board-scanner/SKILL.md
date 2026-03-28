@@ -128,35 +128,35 @@ are responsible for querying the issue type themselves.
 | 12 | `po:ready` | `po.backlog` |
 | 13 | `arch:in-progress` | `arch.in_progress` |
 
-**Story priority (highest first):**
+**Story priority (highest first — closer to finish line wins):**
 
 | # | Status | Event |
 |---|--------|-------|
-| 1 | `qe:test-design` | `qe.test_design` |
-| 2 | `dev:implement` | `dev.implement` |
-| 3 | `qe:verify` | `qe.verify` |
-| 4 | `dev:code-review` | `dev.code_review` |
+| 1 | `qe:verify` | `qe.verify` |
+| 2 | `dev:code-review` | `dev.code_review` |
+| 3 | `dev:implement` | `dev.implement` |
+| 4 | `qe:test-design` | `qe.test_design` |
 | 5 | `sre:infra-setup` | `sre.setup` |
 
-**Bug priority:**
+**Bug priority (highest first — closer to finish line wins):**
 
 | # | Status | Event |
 |---|--------|-------|
-| 1 | `bug:investigate` | `qe.investigate` |
-| 2 | `arch:review` | `arch.review` |
-| 3 | `arch:refine` | `arch.refine` |
-| 4 | `bug:breakdown` | `arch.breakdown` |
-| 5 | `bug:in-progress` | `bug.in_progress` |
-| 6 | `qe:verify` | `qe.verify` |
+| 1 | `qe:verify` | `qe.verify` |
+| 2 | `bug:in-progress` | `bug.in_progress` |
+| 3 | `arch:review` | `arch.review` |
+| 4 | `bug:investigate` | `qe.investigate` |
+| 5 | `arch:refine` | `arch.refine` |
+| 6 | `bug:breakdown` | `arch.breakdown` |
 
 Note: `po:plan-review` and `qe:verify` are shared with Epic/Story tables. Bugs at these statuses are dispatched to the same hats, which query the issue type to determine the correct path.
 
-**Content priority:**
+**Content priority (highest first — closer to finish line wins):**
 
 | # | Status | Event |
 |---|--------|-------|
-| 1 | `cw:write` | `cw.write` |
-| 2 | `cw:review` | `cw.review` |
+| 1 | `cw:review` | `cw.review` |
+| 2 | `cw:write` | `cw.write` |
 
 No work found → emit `LOOP_COMPLETE`.
 
