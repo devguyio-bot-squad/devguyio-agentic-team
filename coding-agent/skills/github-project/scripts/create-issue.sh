@@ -19,6 +19,7 @@ KIND=""
 PARENT=""
 MILESTONE=""
 ASSIGNEE=""
+LABELS=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -44,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --assignee)
       ASSIGNEE="$2"
+      shift 2
+      ;;
+    --label)
+      LABELS="$LABELS $2"
       shift 2
       ;;
     *)
@@ -195,6 +200,12 @@ if [ -n "$ASSIGNEE" ]; then
   gh issue edit "$ISSUE_NUM" --repo "$TEAM_REPO" --add-assignee "$ASSIGNEE" 2>&1 || \
     echo "⚠️  WARNING: Could not assign '$ASSIGNEE'"
 fi
+
+# Add labels if specified
+for label in $LABELS; do
+  gh issue edit "$ISSUE_NUM" --repo "$TEAM_REPO" --add-label "$label" 2>&1 || \
+    echo "⚠️  WARNING: Could not add label '$label'"
+done
 
 # Add issue to project and capture the item ID directly from the response
 ADD_RESULT=$(gh project item-add "$PROJECT_NUM" --owner "$OWNER" --url "$ISSUE_URL" --format json 2>&1)
