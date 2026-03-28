@@ -120,7 +120,7 @@ The story lifecycle follows a TDD flow:
 | `dev:code-review` | dev | Code review of implementation |
 | `qe:verify` | QE | QE verifying implementation against acceptance criteria |
 | `arch:sign-off` | architect | Auto-advance (see below) |
-| `po:merge` | PO | Auto-advance (see below) |
+| `po:merge` | PO | Human-gated merge for code PRs; auto-advance for non-code issues (see below) |
 | `done` | — | Story complete |
 
 ### Story Rejection Loops
@@ -243,7 +243,9 @@ Content stories follow the same terminal path as regular stories: on review appr
 Some statuses are handled automatically by the board scanner without dispatching a hat:
 
 - `arch:sign-off` → auto-advances to `po:merge`. In the compact profile, the same agent that designed the epic signs off — no separate gate needed.
-- `po:merge` → auto-advances to `done` for stories. Code review already approved the implementation — no separate merge gate needed.
+- `po:merge` → behavior depends on whether the issue has an associated PR:
+  - **With PR (code changes):** Board scanner verifies the PR exists and is approved, then notifies the human via RObot. Human is the sole merge authority — the board scanner NEVER calls `gh pr merge`. Once the human merges, the next scan detects the merge and advances to `done`.
+  - **Without PR (non-code issues):** Auto-advances to `done` as before.
 
 ---
 
@@ -374,6 +376,52 @@ Valid review statuses: `approved`, `changes-requested`.
 
 ---
 
+## PR Lifecycle for Code Changes
+
+Pull requests for project code changes (bug fixes, feature implementations) follow this lifecycle:
+
+### Branch Naming
+
+```
+feature/<type>-<issue-number>-<description>
+```
+
+Where `<type>` is `bug`, `story`, or `epic` (e.g., `feature/bug-42-fix-null-pointer`).
+
+### PR Format
+
+| Field | Convention |
+|-------|------------|
+| Title | `[#<issue-number>] <description>` |
+| Base | `main` (or earlier PR branch for stacked PRs) |
+| Body | Must reference the issue number and summarize the change |
+
+### Draft vs Ready States
+
+- **Draft:** Created during `qe:test-design` or early implementation when work is not yet complete.
+- **Ready:** Marked ready when implementation is complete and code review passes at `dev:code-review`.
+
+### PR Stacking
+
+When multiple PRs target `main` and conflicts are expected, or for batching related fixes:
+
+1. First PR bases on `main`
+2. Subsequent PRs base on the previous PR's branch
+3. Human merges in order — each PR is rebased after the previous one merges
+
+### Merge Authority
+
+The **human is the sole merge authority**. The board scanner at `po:merge`:
+
+1. Checks if the issue has an associated PR that is approved
+2. Notifies the human via RObot that the PR is ready to merge
+3. Keeps the issue at `po:merge` until the human merges
+4. On the next scan after merge is detected, advances the issue to `done`
+
+The board scanner NEVER calls `gh pr merge`.
+
+---
+
 ## Communication Protocols
 
 The compact profile uses a single-member self-transition model. All operations use the `github-project` skill:
@@ -393,12 +441,17 @@ The agent records work output by:
 
 ### Pull Requests
 
-PRs on the team repo are for team-level changes:
+**Team repo PRs** are for team-level changes:
 - Process document updates
 - Knowledge file additions or modifications
 - Invariant changes
 
-PRs are NOT used for code changes to the project repo. Code changes go through the project's own review process.
+**Project repo PRs** are for code changes:
+- Bug fixes
+- Feature implementations
+- Refactoring
+
+See the "PR Lifecycle for Code Changes" section for branch naming, PR format, and merge conventions.
 
 ---
 
