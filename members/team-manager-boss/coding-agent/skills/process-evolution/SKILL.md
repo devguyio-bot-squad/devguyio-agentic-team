@@ -7,7 +7,7 @@ description: >-
   records every decision as a team agreement.
   Use when asked to "change the process", "add a status", "remove a status",
   "modify the workflow", "update transitions", "add a review gate",
-  "evolve the process", "change auto-advance rules", or when an mgr:todo
+  "evolve the process", "change auto-advance rules", or when an cos:todo
   issue requests a process change.
 metadata:
   author: botminter
@@ -22,7 +22,7 @@ and recorded in `agreements/decisions/`.
 
 ## When to Use
 
-- An `mgr:todo` issue requests a process or workflow change
+- An `cos:todo` issue requests a process or workflow change
 - A retrospective action item of type `process-change` needs execution
 - The operator wants to add, remove, or modify statuses in the lifecycle
 - The team needs a new review gate or wants to remove one
@@ -252,7 +252,7 @@ id: <next-id>
 type: decision
 status: accepted
 date: <today ISO date>
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 ---
 # Process Change: <summary>
 

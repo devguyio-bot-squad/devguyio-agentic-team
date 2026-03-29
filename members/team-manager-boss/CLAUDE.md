@@ -1,6 +1,6 @@
-# Team Manager — Team Member Context
+# Chief of Staff — Team Member Context
 
-This file provides context for operating as the team manager. Read `team/context.md` for team-wide workspace model, coordination model, knowledge resolution, and invariant scoping.
+This file provides context for operating as the chief of staff. Read `team/context.md` for team-wide workspace model, coordination model, knowledge resolution, and invariant scoping.
 
 ## A. Project Context
 
@@ -28,10 +28,10 @@ Board scanning is handled by an auto-inject skill, not a hat.
 ### Workspace Layout
 
 ```
-team-manager-workspace/              # Workspace (CWD)
+chief-of-staff-workspace/              # Workspace (CWD)
   team/                              # Team repo clone (submodule)
     knowledge/, invariants/          # Team-level
-    members/team-manager-*/          # Member config
+    members/chief-of-staff-*/          # Member config
     projects/<project>/              # Project-specific
   PROMPT.md
   CLAUDE.md

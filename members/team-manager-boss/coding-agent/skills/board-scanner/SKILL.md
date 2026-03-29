@@ -2,7 +2,7 @@
 name: board-scanner
 description: >-
   Board scanning and dispatch procedure for GitHub Projects v2.
-  Scans the project board for mgr:* statuses and dispatches work
+  Scans the project board for cos:* statuses and dispatches work
   to the executor hat via priority table.
   Auto-injected into coordinator prompts.
 metadata:
@@ -10,10 +10,10 @@ metadata:
   version: 1.0.0
 ---
 
-# Board Scanner (Team Manager Scope)
+# Board Scanner (Chief of Staff Scope)
 
 This skill defines your PLAN step when coordinating. Scan the GitHub
-Projects v2 board for `mgr:*` statuses, then DELEGATE by publishing
+Projects v2 board for `cos:*` statuses, then DELEGATE by publishing
 exactly one event to the executor hat.
 
 ## Scan Procedure
@@ -58,7 +58,7 @@ STATUS_FIELD_ID=$(echo "$FIELD_DATA" | jq -r '.fields[] | select(.name=="Status"
 gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json
 ```
 
-Parse the JSON to extract items with Status field values starting with `mgr:`.
+Parse the JSON to extract items with Status field values starting with `cos:`.
 
 ### 6. Log to poll-log.txt
 
@@ -66,22 +66,22 @@ Use `$(date -u +%Y-%m-%dT%H:%M:%SZ)` for all timestamps.
 
 ```
 2026-03-02T10:15:00Z — board.scan — START
-2026-03-02T10:15:01Z — board.scan — 1 mgr issues found
+2026-03-02T10:15:01Z — board.scan — 1 cos issues found
 2026-03-02T10:15:01Z — board.scan — END
 ```
 
 ### 7. Dispatch
 
-Dispatch based on the `mgr:*` status found. Process one item at a time.
+Dispatch based on the `cos:*` status found. Process one item at a time.
 
 **Priority (highest first):**
 
 | # | Status | Event |
 |---|--------|-------|
-| 1 | `mgr:todo` | `mgr.execute` |
-| 2 | `mgr:in-progress` | `mgr.execute` |
+| 1 | `cos:todo` | `cos.execute` |
+| 2 | `cos:in-progress` | `cos.execute` |
 
-No mgr work found -> emit `LOOP_COMPLETE`.
+No cos work found -> emit `LOOP_COMPLETE`.
 
 ## Idempotency
 
@@ -118,7 +118,7 @@ If any `gh` command fails during the scan:
 All board scanner comments use:
 
 ```
-### 📋 team-manager — $(date -u +%Y-%m-%dT%H:%M:%SZ)
+### 📋 chief-of-staff — $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 ## Rules

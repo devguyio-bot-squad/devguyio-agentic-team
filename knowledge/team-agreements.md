@@ -31,7 +31,7 @@ id: 1
 type: decision | retro
 status: proposed | accepted | superseded
 date: 2026-03-21
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 supersedes: null  # id of previous agreement if replacing one
 refs: []          # related issue numbers, retro ids, etc.
 ---

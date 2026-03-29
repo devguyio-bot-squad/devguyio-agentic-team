@@ -112,9 +112,9 @@ for f in $(ls -t agreements/retros/ 2>/dev/null | head -3); do
     "agreements/retros/$f" 2>/dev/null
 done
 
-# Check for open mgr:todo issues
+# Check for open cos:todo issues
 # Use the github-project skill's query-issues operation:
-#   query-issues --type label --label "mgr:todo"
+#   query-issues --type label --label "cos:todo"
 ```
 
 ### Process Summary
@@ -126,7 +126,7 @@ grep -A 15 "Epic Lifecycle\|Story Lifecycle" PROCESS.md 2>/dev/null | head -20
 ```
 
 Present the dashboard in a readable format. Highlight items that need attention
-(pending action items, open mgr:todo issues).
+(pending action items, open cos:todo issues).
 
 ## Retro-First Flow
 

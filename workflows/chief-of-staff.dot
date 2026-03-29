@@ -1,5 +1,5 @@
-// Manager workflow state machine
-// Statuses: mgr:todo, mgr:in-progress, mgr:done
+// Chief of Staff workflow state machine
+// Statuses: cos:todo, cos:in-progress, cos:done
 
 digraph manager {
     rankdir=LR;
@@ -7,24 +7,24 @@ digraph manager {
     node [fontname="Helvetica", style="filled", fontsize=11];
     edge [fontname="Helvetica", fontsize=9];
 
-    // Manager (teal)
+    // Chief of Staff (teal)
     node [fillcolor="#5EEAD4", color="#115E59", shape=box];
-    "mgr:todo";
-    "mgr:in-progress";
+    "cos:todo";
+    "cos:in-progress";
 
-    // Terminal (mgr:done)
+    // Terminal (cos:done)
     node [fillcolor="#5EEAD4", color="#115E59", shape=doublecircle];
-    "mgr:done";
+    "cos:done";
 
     // Error
     node [fillcolor="#FCA5A5", color="#B91C1C", shape=box];
     "error";
 
     // --- Transitions ---
-    "mgr:todo" -> "mgr:in-progress" [label="start"];
-    "mgr:in-progress" -> "mgr:done" [label="complete"];
+    "cos:todo" -> "cos:in-progress" [label="start"];
+    "cos:in-progress" -> "cos:done" [label="complete"];
 
     // --- Error transitions ---
-    "mgr:todo" -> "error" [style=dotted, color="#9CA3AF"];
-    "mgr:in-progress" -> "error" [style=dotted, color="#9CA3AF"];
+    "cos:todo" -> "error" [style=dotted, color="#9CA3AF"];
+    "cos:in-progress" -> "error" [style=dotted, color="#9CA3AF"];
 }

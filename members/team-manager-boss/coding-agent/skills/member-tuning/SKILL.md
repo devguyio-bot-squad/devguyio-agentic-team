@@ -7,7 +7,7 @@ description: >-
   edits, and propagation steps for each artifact type.
   Use when asked to "tune a member", "fix a member", "troubleshoot a member",
   "member isn't working", "adjust member behavior", "member diagnostic",
-  "why is the member doing X", or when an mgr:todo issue requests member tuning.
+  "why is the member doing X", or when an cos:todo issue requests member tuning.
 metadata:
   author: botminter
   version: 1.0.0
@@ -21,7 +21,7 @@ is recorded as a decision in `agreements/decisions/`.
 
 ## When to Use
 
-- An `mgr:todo` issue requests tuning or troubleshooting a member
+- An `cos:todo` issue requests tuning or troubleshooting a member
 - A retrospective action item of type `member-tuning` needs execution
 - The operator reports a member is behaving incorrectly
 - A member keeps making the same kind of mistake
@@ -307,7 +307,7 @@ id: <next-id>
 type: decision
 status: accepted
 date: <today ISO date>
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 ---
 # Member Tuning: <member-name>
 

@@ -4,7 +4,7 @@ description: >-
   Guides a structured team retrospective examining what went well, what didn't,
   and produces typed action items. Outputs a retro summary to agreements/retros/.
   Use when asked to "run a retro", "do a retrospective", "reflect on the sprint",
-  "what went well", "review team performance", or when an mgr:todo issue requests
+  "what went well", "review team performance", or when an cos:todo issue requests
   a retrospective.
 metadata:
   author: botminter
@@ -18,7 +18,7 @@ board, and produce a retro summary with typed action items.
 
 ## When to Use
 
-- An `mgr:todo` issue requests a retrospective
+- An `cos:todo` issue requests a retrospective
 - The operator asks to reflect on a sprint, milestone, or time period
 - You want to identify improvement opportunities from completed work
 
@@ -89,9 +89,9 @@ For each identified improvement, create a typed action item:
 
 | Type | When to Use | Follow-Through |
 |------|------------|----------------|
-| `process-change` | Workflow, status lifecycle, or ceremony changes | Create an `mgr:todo` issue referencing the retro |
-| `role-change` | Add, remove, or restructure roles | Create an `mgr:todo` issue referencing the retro |
-| `member-tuning` | Adjust PROMPT, CLAUDE.md, hats, skills, or PROCESS for a member | Create an `mgr:todo` issue referencing the retro |
+| `process-change` | Workflow, status lifecycle, or ceremony changes | Create an `cos:todo` issue referencing the retro |
+| `role-change` | Add, remove, or restructure roles | Create an `cos:todo` issue referencing the retro |
+| `member-tuning` | Adjust PROMPT, CLAUDE.md, hats, skills, or PROCESS for a member | Create an `cos:todo` issue referencing the retro |
 | `knowledge-update` | Add or update knowledge docs | Can be handled by the knowledge-manager skill |
 | `norm` | Propose a new team working agreement | Write directly to `agreements/norms/` |
 
@@ -121,7 +121,7 @@ id: <next-id>
 type: retro
 status: accepted
 date: <today ISO date>
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 refs: [<issue-numbers-examined>]
 ---
 # Retrospective: <scope title>
@@ -161,13 +161,13 @@ After writing the retro summary:
    `active` and reference the retro ID in `refs`.
 
 2. **For `process-change`, `role-change`, `member-tuning` actions**: Create
-   `mgr:todo` issues on the team repo for each, referencing the retro file:
+   `cos:todo` issues on the team repo for each, referencing the retro file:
 
    ```bash
    gh issue create --repo "$TEAM_REPO" \
      --title "<action title>" \
      --body "Follow-up from retro agreements/retros/NNNN-<title>.md\n\n<description>" \
-     --label "mgr:todo"
+     --label "cos:todo"
    ```
 
 3. **For `knowledge-update` actions**: Document the recommendation in the
@@ -178,7 +178,7 @@ After writing the retro summary:
 Summarize what was produced:
 - Path to the retro file
 - Number of action items by type
-- Any `mgr:todo` issues created
+- Any `cos:todo` issues created
 - Any norms written to `agreements/norms/`
 
 ## Comment Format
@@ -186,7 +186,7 @@ Summarize what was produced:
 All retrospective comments on issues use:
 
 ```
-### 📋 team-manager — $(date -u +%Y-%m-%dT%H:%M:%SZ)
+### 📋 chief-of-staff — $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 ## Error Handling

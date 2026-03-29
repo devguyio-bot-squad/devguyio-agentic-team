@@ -6,7 +6,7 @@ description: >-
   before changes, and records every change as a team agreement decision.
   Use when asked to "add a role", "remove a role", "list roles", "inspect a role",
   "change team composition", "what roles do we have", "team structure",
-  or when an mgr:todo issue requests a role change.
+  or when an cos:todo issue requests a role change.
 metadata:
   author: botminter
   version: 1.0.0
@@ -19,7 +19,7 @@ role change is recorded as a decision in `agreements/decisions/`.
 
 ## When to Use
 
-- An `mgr:todo` issue requests adding, removing, or modifying a role
+- An `cos:todo` issue requests adding, removing, or modifying a role
 - The operator asks about the team's role structure
 - You need to understand what a role does (hats, statuses, skills)
 - A retrospective action item of type `role-change` needs execution
@@ -159,7 +159,7 @@ id: <next-id>
 type: decision
 status: accepted
 date: <today ISO date>
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 ---
 # Add Role: <role-name>
 
@@ -265,7 +265,7 @@ id: <next-id>
 type: decision
 status: accepted
 date: <today ISO date>
-participants: [operator, team-manager]
+participants: [operator, chief-of-staff]
 ---
 # Remove Role: <role-name>
 
@@ -325,7 +325,7 @@ done
 All role management comments on issues use:
 
 ```
-### 🏗 team-manager — $(date -u +%Y-%m-%dT%H:%M:%SZ)
+### 🏗 chief-of-staff — $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 ## Error Handling

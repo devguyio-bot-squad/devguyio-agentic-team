@@ -6,15 +6,15 @@ schema_version: '1.0'
 roles:
 - name: superman
   description: All-in-one member — PO, architect, dev, QE, SRE, content writer
-- name: team-manager
+- name: chief-of-staff
   description: Process improvement and team coordination
 labels:
 - name: kind/docs
   color: '0075CA'
   description: Label modifier — routes any issue type to content writer hats
-- name: role/team-manager
+- name: role/chief-of-staff
   color: '5319E7'
-  description: Assigned to team manager
+  description: Assigned to chief of staff
 statuses:
 - name: po:triage
   description: New epic, awaiting evaluation
@@ -74,12 +74,12 @@ statuses:
   description: Content writer writing
 - name: cw:review
   description: Content writer reviewing
-- name: mgr:todo
-  description: Task awaiting team manager
-- name: mgr:in-progress
-  description: Team manager working on task
-- name: mgr:done
-  description: Task completed by team manager
+- name: cos:todo
+  description: Task awaiting chief of staff
+- name: cos:in-progress
+  description: Chief of staff working on task
+- name: cos:done
+  description: Task completed by chief of staff
 - name: error
   description: Issue failed processing 3 times
 projects:
