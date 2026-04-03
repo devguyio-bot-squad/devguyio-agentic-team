@@ -11,9 +11,11 @@
 
 BotMinter's scrum-compact profile ships a complete agentic SDLC: 18 specialized hats, board-driven dispatch across a 34-status workflow graph, a four-level knowledge hierarchy, and rejection loops at every review gate. The machinery exists. The problem is that it runs on trust.
 
-Invariants are prose markdown that instruct agents what to do — but nothing mechanically prevents violations. ADR-0007 establishes domain-command layering: domain modules must not use `println!` or reference CLI libraries. A `println!` call in `crates/bm/src/formation/mod.rs` violates this rule, but the `dev_code_reviewer` hat has no tool to catch it. The hat reads the prose invariant, applies judgment, and hopes for the best. Sometimes it catches violations. Sometimes it doesn't. The `test-path-isolation` invariant requires tests to use temp directories for `$HOME` — mechanically checkable with a grep, but no grep runs. The `no-hardcoded-profiles` invariant forbids hardcoded profile names in code — also greppable, also unchecked.
+Invariants are prose markdown that instruct agents what to do — but nothing mechanically prevents violations. ADR-0007 establishes domain-command layering: domain modules must not use `println!` or reference CLI libraries. Today the codebase is clean — `println!` calls exist only in the command layer where they belong, and `clap` imports are confined to `main.rs`, `cli.rs`, and `commands/`. But nothing *enforces* this. If a developer (human or agent) adds a `println!` to `crates/bm/src/formation/mod.rs` tomorrow, the `dev_code_reviewer` hat has no tool to catch it. The hat reads the prose invariant, applies judgment, and hopes for the best. Sometimes it catches violations. Sometimes it doesn't.
 
-This matters because the same enforcement gap shows up at every level. Design reviews that should interrogate content instead check a process list. Code reviews that should validate architectural rules instead trust that the implementer read the ADRs. Verification that should confirm structured test output instead parses raw console text by pattern-matching.
+The same gap applies to other mechanically-checkable rules: `test-path-isolation` (tests must use temp directories for `$HOME` — a grep for `home_dir()` outside test setup would catch violations, but no grep runs), `no-hardcoded-profiles` (no hardcoded profile/role names in code — also greppable, also unchecked), and `file-size-limit` per ADR-0006 (a `wc -l` check, also not automated).
+
+This matters because the enforcement gap compounds across the pipeline. Design reviews that should interrogate content instead check a process list. Code reviews that should validate architectural rules instead trust that the implementer read the ADRs. Verification that should confirm structured test output instead parses raw console text by pattern-matching.
 
 OpenAI's Harness Engineering team built a production product — ~1M lines of code, five months, three engineers, zero manually-written code. The core lesson from their experience is not about scale or speed. It's about where engineering effort goes:
 
@@ -21,13 +23,20 @@ OpenAI's Harness Engineering team built a production product — ~1M lines of co
 
 Their engineers stopped writing code and started building environments where agents produce correct code by construction. Custom linters catch architecture violations with error messages written *for agents*, including remediation instructions. A structured knowledge base replaces the monolithic instruction file. Golden principles are encoded once and enforced on every line of code, automatically. Quality is maintained by a garbage-collection process that detects and fixes drift daily, not by humans spending Fridays cleaning up.
 
-This design proposes six features that close the gap between BotMinter's existing process structure and mechanical enforcement. Each feature is a scrum-compact profile enhancement. No changes to Ralph Orchestrator.
+This design proposes six features that close the gap between BotMinter's existing process structure and mechanical enforcement. Each feature is a scrum-compact profile enhancement. No changes to the Ralph Orchestrator product (ralph.yml schema, event loop, hat dispatch engine). Three features modify profile-level orchestration artifacts — board-scanner skill instructions, hat definitions, and the `botminter.yml` manifest schema. Section 2.3 maps each change to its product layer.
 
 ### Scope
 
 All changes are delivered as profile enhancements (invariant checks, hat definitions, knowledge conventions, directory templates, manifest schema additions) with supporting CLI changes for new manifest fields. Every feature is additive or opt-in. Default behavior is preserved.
 
-This design does not modify Ralph Orchestrator, the formation system, or the bridge system. It does not create a new profile. It does not change the status graph or add new GitHub Projects statuses.
+This design does not modify the Ralph Orchestrator product, the formation system, or the bridge system. It does not create a new profile. It does not change the status graph or add new GitHub Projects statuses.
+
+Three features do modify profile-level orchestration artifacts:
+- **Feature 3 (Garbage Collection)** adds a `gardener.scan` event and an `arch_gardener` hat to the board-scanner dispatch table and role definition — a new hat trigger and scheduling mechanism within the profile's scanner skill.
+- **Feature 5 (Graduated Autonomy)** changes the `po_reviewer` hat's behavior based on a runtime config value read from `botminter.yml`.
+- **Feature 6 (Metrics)** adds a JSONL write step to the board-scanner skill's transition logging.
+
+These are profile-level changes (hat definitions, skill instructions, manifest schema), not changes to Ralph's core engine.
 
 ---
 
@@ -43,8 +52,8 @@ Harness's techniques evolved over five months of building with agents. Some of t
 | Agent-to-agent review chain ("Ralph Wiggum Loop") | `lead_reviewer` → `dev_code_reviewer` → `qe_verifier` pipeline | Reviews apply process checklists, not adversarial technical interrogation. No inline PR comments. |
 | AGENTS.md as table of contents — short map, not encyclopedia | CLAUDE.md → `knowledge/` hierarchy → hat knowledge. Progressive disclosure by specificity. | Match in structure. Knowledge isn't always *consulted* effectively, but the mechanism works. |
 | Structured `docs/` as system of record — indexed, versioned, cross-linked | Knowledge hierarchy (team, project, member, hat). Design docs in project knowledge. | Planning artifacts fragmented across four methodology phases. No execution plans. No tech-debt tracker. |
-| Custom linters with agent-readable error messages | 11 prose invariants in the BotMinter project. 10 ADRs with accepted conventions. | **Zero mechanical enforcement.** No check runs. No structured error output. This is the biggest gap. |
-| Per-worktree app boot + Chrome DevTools Protocol for UI validation | Formation abstraction (ADR-0008) handles deployment lifecycle. Local and K8s formations exist. | No per-worktree boot for agent use. No structured test output. BotMinter is a CLI, not a web app — DevTools doesn't apply directly. |
+| Custom linters with agent-readable error messages | 11 prose invariants in the BotMinter project repo (`projects/botminter/invariants/`). 10 ADRs with accepted conventions. 2 profile-generic invariants extracted to `team/invariants/`. | **Zero mechanical enforcement.** No check runs. No structured error output. This is the biggest gap. |
+| Per-worktree app boot + Chrome DevTools Protocol for UI validation | Formation abstraction (ADR-0008) handles deployment lifecycle. Local and K8s formations exist. | No per-worktree boot for agent use. No structured test output. BotMinter is a CLI, not a web app — Chrome DevTools doesn't apply. Structured test output and formation-aligned dev-boot are the right adaptations. |
 | Golden principles + doc-gardening agent — automated entropy management | Nothing. | No quality scoring, no stale-doc detection, no automated cleanup. |
 | Plans as first-class artifacts — active, completed, tech-debt, all versioned | Design docs exist. Story breakdowns exist in issue comments. | No execution plans. No progress tracking as living documents. |
 | Graduated autonomy — agents merge own PRs, humans optional | Three fixed human gates: design-review, plan-review, accept. | No progression path. No way to reduce gates as trust is established. |
@@ -54,13 +63,13 @@ Harness's techniques evolved over five months of building with agents. Some of t
 
 This is the deepest problem and the one Harness solved first.
 
-BotMinter has 11 project invariants. Three examples illustrate what "prose-only enforcement" means in practice:
+BotMinter has 11 project-specific invariants (in the project repo at `projects/botminter/invariants/`) and 2 profile-generic invariants (extracted to `team/invariants/`). Three project invariants illustrate what "prose-only enforcement" means in practice:
 
 **`test-path-isolation`** requires that tests set `$HOME` to a temporary directory, never using the real user's home. A check script could grep for `dirs::home_dir()` or `env::home_dir()` outside of test setup code and flag violations. No such script exists. A violation would pass code review undetected because the reviewer hat is applying judgment, not running a tool.
 
 **`no-hardcoded-profiles`** requires that code and tests never hardcode profile names, role names, or status values. A check script could grep for string literals matching known profile/role/status names in non-test source files. No such script exists.
 
-**ADR-0007 (domain-command layering)** requires domain modules to not import CLI libraries. A check script could scan import statements in files under domain module directories. No such script exists.
+**ADR-0007 (domain-command layering)** requires domain modules to not import CLI libraries. The codebase is currently clean — `clap` imports are confined to `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`, and `commands/`. But compliance is accidental, not enforced. A check script could scan import statements in domain module directories (formation/, bridge/, profile/, config/, workspace/, topology/, state/, session/) and flag any `clap` or `println!` usage. No such script exists.
 
 Harness built custom linters specifically because the error messages could be written *for agents*:
 
@@ -70,20 +79,24 @@ The error message isn't "check failed" — it's structured data: what rule was v
 
 ### 2.3 Where Changes Land
 
-Every change in this design maps to a specific BotMinter product layer:
+Every change in this design maps to a specific BotMinter product layer. The workspace model places the team repo at `team/` and project repos at `projects/<project>/` relative to the agent's working directory (the workspace root).
 
-| Change | Product Layer | Location |
+| Change | Product Layer | Location (relative to workspace root) |
 |---|---|---|
-| Baseline check scripts | Profile: invariant checks | `profiles/scrum-compact/invariants/checks/` |
-| Check script contract doc | Profile: knowledge | `profiles/scrum-compact/knowledge/` |
-| Gardener hat definition | Profile: role definition | `profiles/scrum-compact/roles/superman/ralph.yml` |
-| Reviewer hat updates (check-running) | Profile: role definition | `profiles/scrum-compact/roles/superman/ralph.yml` |
-| Golden principles config | Profile: invariants | `profiles/scrum-compact/invariants/golden-principles.yml` |
-| Plan directory template | Profile: directory template | `profiles/scrum-compact/plans/` |
-| Structured test output convention | Profile: knowledge | `profiles/scrum-compact/knowledge/` |
-| Autonomy manifest field | Manifest schema | `profiles/scrum-compact/botminter.yml` |
-| Autonomy CLI parsing | CLI source | `crates/bm/src/` (profile parsing) |
-| Transition JSONL logging | Profile: skill | Board-scanner skill instructions |
+| Profile-generic check scripts | Profile: invariant checks (extracted to team repo) | `team/invariants/checks/` |
+| Project-specific check scripts | Project repo: invariant checks | `projects/<project>/invariants/checks/` |
+| Check runner script | Profile: skill | `team/coding-agent/skills/check-runner/run-checks.sh` |
+| Check script contract doc | Profile: knowledge | `team/knowledge/check-script-contract.md` |
+| Gardener hat definition | Profile: role definition (in ralph.yml hats section) | `ralph.yml` hats entry + board-scanner dispatch table |
+| Reviewer hat updates (check-running) | Profile: hat instructions | `ralph.yml` hat instructions for `dev_code_reviewer`, `qe_verifier` |
+| Golden principles config | Project repo: invariants | `projects/<project>/invariants/golden-principles.yml` |
+| Plan directory template | Team repo: project plans | `team/projects/<project>/plans/` |
+| Structured test output convention | Profile: knowledge | `team/knowledge/structured-test-output.md` |
+| Dev-boot configuration | Team repo: project knowledge | `team/projects/<project>/knowledge/dev-boot.yml` |
+| Autonomy manifest field | Manifest schema in team repo | `team/botminter.yml` (`autonomy` field) |
+| Autonomy CLI parsing | CLI source | `crates/bm/src/profile/manifest.rs` (`ProfileManifest` struct) |
+| Transition JSONL logging | Profile: skill instructions | Board-scanner skill instructions (additive line) |
+| Metrics JSONL file | Workspace artifact | `metrics/transitions.jsonl` (workspace root) |
 
 ---
 
@@ -99,11 +112,11 @@ Harness's insight: encode rules as executable checks with structured, agent-read
 
 #### Design
 
-**Check script contract.** Each check is a shell script in the profile's `invariants/checks/` directory. Interface:
+**Check script contract.** Each check is a shell script. Interface:
 
-- Runs in the project repository root directory
-- Exit 0 = pass, exit 1 = violation found
-- On failure, writes structured output:
+- **Working directory:** The check runner invokes each script with `cwd` set to the project repository root (`projects/<project>/` relative to the workspace root). All relative paths in scripts resolve against the project repo. For example, a script grepping `crates/bm/src/` works because `cwd` is `projects/botminter/`.
+- **Exit codes:** Exit 0 = pass. Exit 1 with VIOLATION output on stdout = violation found. Exit 1 without VIOLATION output, or exit > 1 = script crash (logged as warning, does not block review).
+- **Output format on violation (exit 1):**
 
 ```
 VIOLATION: Domain module crates/bm/src/formation/mod.rs imports clap::Args (line 14)
@@ -114,29 +127,52 @@ REFERENCE: .planning/adrs/0007-domain-command-layering.md
 
 The `REMEDIATION` line is the key — it gives the agent its next action. The `REFERENCE` line points to the governing rule for context. This follows ADR-0002's design principle: structured output from shell scripts, not arbitrary text.
 
-**Baseline checks.** The scrum-compact profile ships these checks:
+**Two check script scopes.** Check scripts live in two locations, reflecting BotMinter's invariant hierarchy:
+
+| Scope | Location (from workspace root) | Contains | Example |
+|---|---|---|---|
+| Profile-generic | `team/invariants/checks/` | Checks applicable to any project using scrum-compact | `file-size-limit.sh` (ADR-0006), `test-path-isolation.sh` |
+| Project-specific | `projects/<project>/invariants/checks/` | Checks specific to this project's ADRs and invariants | `domain-layer-imports.sh` (ADR-0007), `no-hardcoded-profiles.sh` |
+
+Profile-generic checks are extracted from the profile into the team repo during `bm init`, alongside the existing profile invariant markdown files. Project-specific checks are authored by the team in the project repo, alongside the 11 existing prose invariants.
+
+**Check runner.** A runner script at `team/coding-agent/skills/check-runner/run-checks.sh` handles discovery and execution:
+
+1. Accepts a project name argument (e.g., `botminter`)
+2. Discovers all `.sh` files in `team/invariants/checks/` and `projects/<project>/invariants/checks/`
+3. Executes each with `cwd = projects/<project>/`
+4. Distinguishes violations (exit 1 + VIOLATION output) from crashes (exit 1 without VIOLATION, or exit > 1)
+5. Aggregates results: all violations reported, crashes logged as warnings
+6. Exits 0 if all checks pass, exits 1 if any violations found
+
+**Baseline checks.** The scrum-compact profile ships these profile-generic checks (extracted to `team/invariants/checks/`):
 
 | Script | What It Validates | Enforcement Method |
 |---|---|---|
-| `domain-layer-imports.sh` | Domain modules don't import CLI libs (ADR-0007) | Grep imports in domain module files |
-| `no-println-in-lib.sh` | No `println!` in library code | Grep for `println!` outside `main.rs`/`cli.rs` |
+| `file-size-limit.sh` | No source file exceeds 300 lines (ADR-0006) | `wc -l` on source files |
 | `test-path-isolation.sh` | Tests don't use real HOME paths | Grep for `home_dir()` outside test setup |
-| `no-hardcoded-profiles.sh` | No hardcoded profile/status/role strings | Grep for known names in non-test source |
-| `file-size-limit.sh` | No source file exceeds 300 lines (ADR-0006) | `wc -l` |
 
-Teams add project-specific checks by dropping scripts into the directory. Check discovery is by directory scan — new scripts are picked up automatically.
+The BotMinter project adds these project-specific checks (in `projects/botminter/invariants/checks/`):
+
+| Script | What It Validates | Enforcement Method |
+|---|---|---|
+| `domain-layer-imports.sh` | Domain modules don't import CLI libs (ADR-0007) | Grep for `clap` and `println!` imports in domain module directories |
+| `no-hardcoded-profiles.sh` | No hardcoded profile/status/role strings | Grep for known names in non-test source |
 
 **Hat integration.** Two hats gain check-running steps in their instructions:
-- `dev_code_reviewer`: runs all checks before reviewing. If any fail, rejects to `dev:implement` with the VIOLATION/REMEDIATION output as the feedback comment.
-- `qe_verifier`: runs all checks as part of verification. Failures block verification.
+- `dev_code_reviewer`: runs the check runner before reviewing. If any violations are found, rejects to `dev:implement` with the VIOLATION/REMEDIATION output as the feedback comment.
+- `qe_verifier`: runs the check runner as part of verification. Violations block verification.
+
+Hat instructions specify: `bash team/coding-agent/skills/check-runner/run-checks.sh botminter`. The runner handles cwd, discovery, and error classification.
 
 **Prose invariants remain.** Not every rule can be mechanically checked. `cli-idempotency` requires behavioral testing — you'd have to run each command twice and compare state, which is an E2E test, not a lint. Prose invariants stay as reference docs for rules that require judgment. Executable checks handle what can be automated.
 
 #### Acceptance Criteria
 
-- **Given** a code change introduces `println!` in a domain module, **when** `dev_code_reviewer` runs invariant checks, **then** the check fails with a structured REMEDIATION, and the story returns to `dev:implement`.
+- **Given** a code change introduces `println!` in a domain module, **when** `dev_code_reviewer` runs invariant checks, **then** the check fails with a structured VIOLATION/REMEDIATION message, and the story returns to `dev:implement`.
 - **Given** all checks pass, **when** `dev_code_reviewer` runs checks, **then** review proceeds normally.
-- **Given** a new script is added to the checks directory, **when** subsequent reviews run, **then** the new check is discovered and executed.
+- **Given** a new `.sh` script is added to either checks directory, **when** subsequent reviews run the check runner, **then** the new check is discovered and executed.
+- **Given** a check script has a syntax error, **when** the runner executes it, **then** the crash is logged as a warning but does not block the review. Only explicit violations (exit 1 + VIOLATION output) block.
 
 ---
 
@@ -160,13 +196,13 @@ BotMinter is a CLI tool, not a web app. Chrome DevTools Protocol doesn't apply. 
 {"test": "formation::local::test_start_members", "status": "FAIL", "duration_ms": 1204, "error": "assertion failed: member.is_healthy()", "file": "crates/bm/src/formation/local/mod.rs", "line": 245}
 ```
 
-Implementation: a wrapper script (shipped with the profile) runs `cargo test` and post-processes output into JSON. Hats (`qe_investigator`, `dev_implementer`, `qe_verifier`) use this to navigate directly to failures.
+Implementation: a wrapper script (shipped with the profile, extracted to `team/coding-agent/skills/`) runs `cargo test` and post-processes output into JSON. Hats (`qe_investigator`, `dev_implementer`, `qe_verifier`) use this to navigate directly to failures.
 
 Enforcement: the `dev_code_reviewer` hat and a check script (Feature 1) verify that test commands use the structured output wrapper.
 
 **Phase B: Dev-environment bootstrapping.**
 
-Projects with a runnable application define boot/teardown configuration:
+Projects with a runnable application define boot/teardown configuration in `team/projects/<project>/knowledge/dev-boot.yml`:
 
 ```yaml
 dev_boot:
@@ -176,14 +212,16 @@ dev_boot:
   isolation: worktree
 ```
 
-This aligns with ADR-0008's formation abstraction. The `dev_implementer` and `qe_verifier` hats boot the app when configuration exists, validate behavior at runtime, and tear down when done. Each worktree gets an isolated instance.
+This file lives in the team repo's project knowledge directory because it's project-specific (different projects have different boot commands) and consumed by hats at runtime (hats read `team/projects/<project>/knowledge/` as part of knowledge resolution). It is not in `botminter.yml` because dev-boot is a project concern, not a team-level manifest field.
+
+This aligns with ADR-0008's formation abstraction. The `dev_implementer` and `qe_verifier` hats check for `dev-boot.yml` in the project knowledge directory. If present, they boot the app with `cwd = projects/<project>/`, validate behavior at runtime, and tear down when done. Each worktree gets an isolated instance.
 
 **Phases C-D deferred.** Ephemeral observability (C) and UI introspection (D) are deferred until Phase B proves useful. BotMinter's console UI (`rust-embed` feature) could eventually use browser automation, but the CLI testing foundation must be solid first.
 
 #### Acceptance Criteria
 
 - **Given** tests run during implementation, **when** they complete, **then** structured JSON output is available with test name, status, duration, error, file, and line.
-- **Given** a project with dev-boot configured, **when** `dev_implementer` works on a story, **then** the application boots in isolation and the agent validates behavior at runtime.
+- **Given** a project with `dev-boot.yml` in its knowledge directory, **when** `dev_implementer` works on a story, **then** the application boots in isolation and the agent validates behavior at runtime.
 
 ---
 
@@ -199,43 +237,56 @@ BotMinter's codebase has evolved through four methodology phases. Planning artif
 
 #### Design
 
-**Gardener hat.** A new hat in the superman role definition. Triggered by `gardener.scan` events dispatched by the board scanner on a configurable schedule (e.g., every N scan cycles). The hat:
+**Gardener hat.** A new hat (`arch_gardener`) added to the superman role definition in `ralph.yml`. Triggered by `gardener.scan` events.
 
-1. Runs all executable invariant checks (Feature 1) and logs aggregate results
+**Scheduling.** The board-scanner skill's dispatch table gains a new entry: `gardener.scan`, dispatched on a cadence. This is a profile-level orchestration change — it modifies the scanner skill's instructions and adds a new event type to the dispatch table. The scanner tracks a cycle counter in its scratchpad (`.ralph/agent/scratchpad.md`). A knowledge file (`team/knowledge/gardener-config.md`) specifies the interval (e.g., "run gardener every 10 scan cycles"). When the counter reaches the interval, the scanner emits `gardener.scan` instead of (or after) processing the highest-priority issue. The counter resets.
+
+The gardener hat:
+
+1. Runs the check runner (Feature 1) and logs aggregate results
 2. Scans code against golden principles (below) — detects pattern violations
 3. Checks documentation freshness: do referenced functions, files, and paths still exist?
 4. Produces a quality score per domain area (coverage, invariant compliance, doc freshness)
 5. Opens targeted issues for violations — specific files, specific fixes, specific rationale
+6. If more than 7 days have elapsed since the last metrics report (checked via file timestamp of the latest report in `team/projects/<project>/knowledge/reports/`), creates a `cw:write` issue for the weekly summary (see Feature 6, Reporting)
 
-**Golden principles.** A YAML file in the profile's invariant directory, encoding recurring quality rules:
+**Golden principles.** A YAML file in the project repo's invariants directory (`projects/<project>/invariants/golden-principles.yml`), encoding recurring quality rules. Golden principles are split into two categories based on how they're enforced:
+
+**Mechanically checkable principles** — these become check scripts (Feature 1) that the gardener also runs. Each principle that can be detected by grep, AST scanning, or file system inspection gets a corresponding script in `projects/<project>/invariants/checks/`:
 
 ```yaml
 principles:
-  - name: shared-utilities-over-duplicated
-    description: "Prefer shared utility modules over copy-pasted helpers"
-    detection: "Functions with similar signatures across different modules"
-    remediation: "Extract to shared module, update call sites"
-
-  - name: typed-boundaries
-    description: "Parse and validate at system boundaries, not inline"
-    detection: "Raw string parsing outside config/input modules"
-    remediation: "Move parsing to boundary layer, pass typed data internally"
-
-  - name: consistent-error-handling
-    description: "Use anyhow for application errors, thiserror for library errors"
-    detection: "Mixed error handling approaches within a crate"
-    remediation: "Standardize on the crate's chosen error strategy"
+  mechanically_checkable:
+    - name: consistent-error-handling
+      description: "Use anyhow for application errors, thiserror for library errors"
+      check_script: "consistent-error-handling.sh"
+      remediation: "Standardize on the crate's chosen error strategy"
 ```
 
-These are Harness's "taste invariants" adapted for BotMinter. They encode engineering judgment once and apply it continuously.
+**Judgment-based principles** — these remain as structured guidance for the gardener hat. The gardener applies LLM judgment to detect these during its scan. This is honest: these principles are trust-based, same as current prose invariants, but centralized in one file and applied on a recurring schedule rather than ad-hoc during code review:
 
-**Scheduling.** The board scanner skill dispatches `gardener.scan` on a configurable cadence. This is a change to the scanner skill's instructions (profile-level), not a Ralph Orchestrator change.
+```yaml
+principles:
+  judgment_based:
+    - name: shared-utilities-over-duplicated
+      description: "Prefer shared utility modules over copy-pasted helpers"
+      detection_hint: "Look for functions with similar names and signatures across different modules"
+      remediation: "Extract to shared module, update call sites"
+
+    - name: typed-boundaries
+      description: "Parse and validate at system boundaries, not inline"
+      detection_hint: "Look for raw string parsing or deserialization outside config/input modules"
+      remediation: "Move parsing to boundary layer, pass typed data internally"
+```
+
+The `detection_hint` field tells the gardener *what to look for*, not *how to find it mechanically*. The distinction from prose invariants: golden principles are centralized, versioned, and applied on schedule by a dedicated hat — not scattered across files and applied ad-hoc.
 
 #### Acceptance Criteria
 
-- **Given** the gardener scans, **when** it finds duplicated utility code, **then** it opens an issue naming the specific files and a remediation plan.
+- **Given** the gardener scans, **when** it finds duplicated utility code matching a judgment-based principle, **then** it opens an issue naming the specific files and a remediation plan.
 - **Given** a knowledge file references a renamed function, **when** the freshness check runs, **then** a fix-up issue is opened.
 - **Given** the gardener completes, **when** it writes the quality score, **then** it reflects current coverage, compliance, and doc freshness.
+- **Given** more than 7 days since the last metrics report, **when** the gardener scans, **then** it creates a `cw:write` issue for the weekly summary.
 
 ---
 
@@ -270,6 +321,8 @@ BotMinter's planning artifacts are scattered. The BotMinter project repo alone c
 - 2026-04-04: Stories created, implementation starting
 ```
 
+Plans live in the team repo at `team/projects/<project>/plans/`. This location is consistent with the knowledge hierarchy — plans are project-specific team artifacts consumed by hats during execution.
+
 **Hat integration:**
 - `arch_planner`: creates the plan when a breakdown is approved
 - `arch_monitor`: updates the plan as stories complete, logs key decisions
@@ -280,16 +333,16 @@ BotMinter's planning artifacts are scattered. The BotMinter project repo alone c
 | Artifact | Home | Rationale |
 |----------|------|-----------|
 | ADRs | Project repo (`.planning/adrs/`) | Codebase decisions. Live with the code per ADR-0001. |
-| Design docs | Team repo project knowledge | Design context consumed by hats during planning and implementation. |
-| Execution plans | Team repo project plans | Living documents tracking execution. Updated by `arch_monitor`. |
+| Design docs | Team repo project knowledge (`team/projects/<project>/knowledge/designs/`) | Design context consumed by hats during planning and implementation. |
+| Execution plans | Team repo project plans (`team/projects/<project>/plans/`) | Living documents tracking execution. Updated by `arch_monitor`. |
 | Knowledge | Team repo knowledge hierarchy | Advisory context loaded on-demand by hats. |
-| Invariants | Profile or team repo | Constraints enforced by hats and check scripts. |
+| Invariants | Profile (team repo) or project repo | Constraints enforced by hats and check scripts. |
 
 This doesn't invalidate existing artifacts. Old plans stay where they are. New work follows the convention.
 
 #### Acceptance Criteria
 
-- **Given** `arch_planner` produces a breakdown, **when** it's approved, **then** an execution plan exists with the story list.
+- **Given** `arch_planner` produces a breakdown, **when** it's approved, **then** an execution plan exists at `team/projects/<project>/plans/` with the story list.
 - **Given** a story completes, **when** `arch_monitor` scans, **then** the plan's story table is updated.
 - **Given** all stories complete, **when** the epic is accepted, **then** the plan is marked completed.
 
@@ -309,7 +362,7 @@ The critical sequencing: Harness built mechanical enforcement *first*, then grad
 
 #### Design
 
-**Manifest extension.** The `botminter.yml` profile manifest gains an `autonomy` field:
+**Manifest extension.** The `team/botminter.yml` manifest gains an `autonomy` field:
 
 ```yaml
 autonomy:
@@ -322,7 +375,13 @@ autonomy:
 | `guided` | accept only | Executable checks passing consistently. Rejection rate < 15% at lead review (measured by Feature 6). |
 | `autonomous` | none — async notification only | Quality metrics sustained at `guided` tier for at least one full epic cycle. |
 
-**CLI implementation.** The `ProfileManifest` struct in profile parsing gains an `autonomy` field. Optional, defaults to `supervised`. During extraction, the setting is written to a runtime config that hats read.
+**CLI implementation.** The `ProfileManifest` struct in `crates/bm/src/profile/manifest.rs` gains an optional `autonomy` field. Defaults to `supervised`. The field is written to `team/botminter.yml` during extraction and persists there as the runtime source of truth.
+
+**Manifest-to-runtime flow.** The `botminter.yml` file in the team repo IS the runtime config. It is not an extraction-time-only artifact — the codebase already reads it at runtime via `read_team_repo_manifest()` (in `profile/team_repo.rs`). Hats access the team repo at `team/` as part of the workspace layout. The flow:
+
+1. **Extraction time:** `bm init` writes the `autonomy` field to `team/botminter.yml` (default: `supervised`)
+2. **Configuration change:** Operator runs `bm teams sync` to update the field (e.g., from `supervised` to `guided`). Agents cannot change this field — it requires a CLI command.
+3. **Runtime:** The `po_reviewer` hat instructions include a step: "Read `team/botminter.yml` and check the `autonomy.tier` field." The hat instructions parse the YAML directly (hats already read YAML knowledge files as part of normal operation).
 
 **Hat behavior.** The `po_reviewer` hat checks the autonomy tier:
 - `supervised`: current behavior — post review request, wait for human comment
@@ -338,7 +397,7 @@ autonomy:
 
 #### Acceptance Criteria
 
-- **Given** `autonomy: guided`, **when** lead review approves a design, **then** `po:design-review` auto-advances with a notification comment.
+- **Given** `autonomy: guided` in `team/botminter.yml`, **when** lead review approves a design, **then** `po:design-review` auto-advances with a notification comment.
 - **Given** `autonomy: guided` and an epic at `po:accept`, **when** the scanner dispatches, **then** the agent waits for human comment.
 - **Given** a human comments `Rejected: <feedback>` on an auto-advanced issue, **when** the agent scans, **then** the status reverts and feedback is processed.
 
@@ -354,13 +413,13 @@ Without metrics, the progression from `supervised` to `guided` autonomy is a gue
 
 #### Design
 
-**Transition logging.** The board-scanner skill appends a JSONL entry after each status transition:
+**Transition logging.** The board-scanner skill's instructions gain an additive step: after each status transition, append a JSONL entry to `metrics/transitions.jsonl` (relative to workspace root):
 
 ```json
 {"issue": 106, "type": "Epic", "from": "arch:design", "to": "lead:design-review", "ts": "2026-04-04T01:10:00Z", "hat": "arch_designer"}
 ```
 
-One line added to the scanner skill's instructions. The skill already logs to `poll-log.txt` and posts comments; this is additive.
+This is a profile-level orchestration change — one line added to the scanner skill's instructions. The skill already logs to `poll-log.txt` and posts comments; this is additive.
 
 **Derived metrics:**
 
@@ -372,12 +431,14 @@ One line added to the scanner skill's instructions. The skill already logs to `p
 | Rejection rate per gate | Percentage of rejections at each status | Quality signal. < 15% qualifies for `guided`. |
 | First-pass rate | Stories reaching `done` without rejection | Quality indicator |
 
-**Reporting.** A `cw_writer` task generates a weekly summary from the JSONL log. The existing `retrospective` skill receives metrics as input for data-driven retros.
+**Reporting.** The gardener hat (Feature 3) checks whether a weekly metrics report is due during each scan. If more than 7 days have passed since the last report (determined by file timestamp in `team/projects/<project>/knowledge/reports/`), the gardener creates a GitHub issue at `cw:write` status with the report task. This issue flows through normal board dispatch to the `cw_writer` hat, which reads the JSONL log and generates a summary. The existing `retrospective` skill receives metrics as input for data-driven retros.
+
+This uses the existing issue lifecycle — no new scheduling mechanism beyond the gardener's cadence (Feature 3).
 
 #### Acceptance Criteria
 
-- **Given** the scanner transitions an issue, **when** the transition completes, **then** a JSONL entry is appended.
-- **Given** a week of data, **when** the weekly report runs, **then** it shows cycle times, rejection rates, and throughput.
+- **Given** the scanner transitions an issue, **when** the transition completes, **then** a JSONL entry is appended to `metrics/transitions.jsonl`.
+- **Given** more than 7 days since the last report and the gardener runs, **when** it creates a `cw:write` issue, **then** the `cw_writer` generates a weekly summary with cycle times, rejection rates, and throughput.
 - **Given** the retro skill runs, **when** metrics data exists, **then** data-driven observations are included.
 
 ---
@@ -392,27 +453,43 @@ REMEDIATION: <what the agent should do>
 REFERENCE: <path to governing document>
 ```
 
-### Golden Principles (YAML)
+### Golden Principles (YAML — in project repo)
 ```yaml
 principles:
-  - name: string
-    description: string
-    detection: string
-    remediation: string
+  mechanically_checkable:
+    - name: string
+      description: string
+      check_script: string    # filename in invariants/checks/
+      remediation: string
+  judgment_based:
+    - name: string
+      description: string
+      detection_hint: string  # what the gardener looks for (LLM judgment)
+      remediation: string
 ```
 
-### Autonomy Configuration (in `botminter.yml`)
+### Dev-Boot Configuration (YAML — in team project knowledge)
+```yaml
+# team/projects/<project>/knowledge/dev-boot.yml
+dev_boot:
+  command: string       # boot command, run with cwd = projects/<project>/
+  health_check: string  # health check command
+  teardown: string      # teardown command
+  isolation: worktree   # each worktree gets its own instance
+```
+
+### Autonomy Configuration (in `team/botminter.yml`)
 ```yaml
 autonomy:
   tier: supervised | guided | autonomous
 ```
 
-### Transition Log Entry (JSONL)
+### Transition Log Entry (JSONL — in workspace root)
 ```json
 {"issue": 0, "type": "Epic|Task|Bug", "from": "status", "to": "status", "ts": "ISO 8601", "hat": "hat_name"}
 ```
 
-### Execution Plan (Markdown)
+### Execution Plan (Markdown — in team project plans)
 ```markdown
 # Execution Plan: Epic #<n> — <title>
 ## Status: In Progress | Completed
@@ -428,7 +505,7 @@ autonomy:
 
 ## 5. Error Handling
 
-**Check script crashes.** A script that errors unexpectedly (syntax error, runtime crash — not a check failure) is logged as a warning. Only explicit violations (exit 1 with VIOLATION output) block review. Three consecutive crashes from the same script flag it for human attention.
+**Check script crashes vs. violations.** A script that errors unexpectedly (syntax error, runtime crash) produces exit 1 without VIOLATION output, or exit > 1. The check runner logs this as a warning and skips the script. Only explicit violations (exit 1 with VIOLATION output on stdout) block review. Three consecutive crashes from the same script flag it for human attention via an issue. This distinction applies uniformly: the `dev_code_reviewer`, `qe_verifier`, and gardener hats all use the check runner, which handles classification.
 
 **Dev-boot failures.** Boot failure or health-check timeout: agent proceeds without the running application (degraded mode). Warning comment posted on the issue.
 
@@ -442,42 +519,51 @@ autonomy:
 
 ## 6. Impact on Existing System
 
-### Profile Changes
+### Profile-Level Changes
 
 | Component | Change | Risk |
 |---|---|---|
-| `invariants/checks/` | New directory + 5 baseline scripts | Low — additive |
-| `invariants/golden-principles.yml` | New config file | Low — additive |
-| `botminter.yml` | `autonomy` field (optional, defaults to `supervised`) | Low — backward compatible |
-| `roles/superman/ralph.yml` | New `arch_gardener` hat + updated `dev_code_reviewer` and `qe_verifier` instructions | Medium — hat changes tested in isolation |
+| `team/invariants/checks/` | New directory + 2 profile-generic baseline scripts | Low — additive |
+| `ralph.yml` hats | New `arch_gardener` hat definition | Medium — new hat, tested in isolation |
+| `ralph.yml` hats | Updated `dev_code_reviewer` and `qe_verifier` instructions (add check-running step) | Medium — additive instruction change |
+| Board-scanner skill | Add `gardener.scan` dispatch entry + cycle counter | Medium — new event type in dispatch table |
 | Board-scanner skill | Add JSONL transition logging instruction | Low — additive |
-| Directory templates | New `plans/` directory | Low — empty at extraction |
-| Knowledge | Two new docs: structured test output convention, check script contract | Low — additive |
+| `team/knowledge/` | Two new docs: structured test output convention, check script contract | Low — additive |
+| `team/coding-agent/skills/check-runner/` | New check runner script | Low — new skill |
+| `team/projects/<project>/plans/` | New directory for execution plans | Low — empty initially |
 
-### CLI Changes
+### Project Repo Changes
 
 | Component | Change | Risk |
 |---|---|---|
-| Profile manifest parsing | Parse optional `autonomy` field | Low — new optional field |
-| Extraction logic | Extract new directories and files | Low — additive |
+| `projects/<project>/invariants/checks/` | New directory + project-specific check scripts | Low — additive |
+| `projects/<project>/invariants/golden-principles.yml` | New config file | Low — additive |
+
+### Manifest / CLI Changes
+
+| Component | Change | Risk |
+|---|---|---|
+| `team/botminter.yml` | `autonomy` field (optional, defaults to `supervised`) | Low — backward compatible |
+| `crates/bm/src/profile/manifest.rs` | Parse optional `autonomy` field in `ProfileManifest` | Low — new optional field |
+| Extraction logic | Extract `invariants/checks/` directory | Low — additive |
 
 ### What Does NOT Change
 
-- Ralph Orchestrator (`ralph.yml` schema, event loop, hat dispatch)
+- Ralph Orchestrator product (`ralph.yml` schema definition, event loop engine, hat dispatch engine)
 - Formation system and credential management (ADR-0002, ADR-0008)
 - Bridge system
-- GitHub Projects integration (same statuses, same board structure)
-- Human gate behavior (unless the operator explicitly changes the autonomy tier)
-- Existing invariants, ADRs, and knowledge files
+- GitHub Projects integration (same statuses, same board structure, no new statuses)
+- Existing invariant and ADR markdown files (these remain; executable checks are additive)
 - The `bm init`, `bm hire`, `bm start` command interfaces
+- Human gate behavior by default (unless the operator explicitly changes the autonomy tier via `bm teams sync`)
 
 ---
 
 ## 7. Security Considerations
 
-**Check scripts execute in the agent's context.** Scripts are read-only analyzers — they scan code, they do not modify it. They are version-controlled in the profile or team repo, not arbitrary uploads. Following ADR-0002's pattern: declarative scripts with structured output, not unconstrained executables. A check script must not write files, make network requests, or modify git state.
+**Check scripts execute in the agent's context.** Scripts are read-only analyzers — they scan code, they do not modify it. They are version-controlled in the team repo or project repo, not arbitrary uploads. Following ADR-0002's pattern: declarative scripts with structured output, not unconstrained executables. A check script must not write files, make network requests, or modify git state.
 
-**Autonomy escalation prevention.** The `autonomous` tier removes all human gates. The setting requires a profile re-sync (`bm teams sync`) to change — agents cannot escalate their own autonomy at runtime. The `Rejected:` comment provides an emergency brake at any tier. Recommendation: sustain `guided` tier for at least one full epic cycle with acceptable metrics before considering `autonomous`.
+**Autonomy escalation prevention.** The `autonomous` tier removes all human gates. The setting lives in `team/botminter.yml` and requires `bm teams sync` to change — agents cannot modify this file through the normal workflow (it's in the team repo, not a hat output). The `Rejected:` comment provides an emergency brake at any tier. Recommendation: sustain `guided` tier for at least one full epic cycle with acceptable metrics before considering `autonomous`.
 
 **Gardener changes go through normal review.** The gardener opens issues and (potentially) PRs for cleanup work. These flow through the standard `dev:implement` → `dev:code-review` → `qe:verify` pipeline. The gardener does not merge its own changes.
 
@@ -491,10 +577,10 @@ autonomy:
 |---|---|---|---|---|
 | 1 | Executable Invariant Checks | — | Low | Foundation. Quality enforcement must exist before anything else. |
 | 2 | Plans as First-Class Artifacts | — | Low | Low-risk, resolves artifact fragmentation immediately. |
-| 3 | Garbage Collection | Phase 1 | Low | Gardener runs the checks from Phase 1 plus golden principles. |
-| 4 | Metrics and Feedback Loops | — | Low | Produces the data needed to justify Phase 5. |
-| 5 | Graduated Autonomy | Phases 1, 4 | Medium | Requires proven enforcement + quality evidence. |
-| 6 | Application Legibility | — | Medium-High | Most complex. Structured test output is standalone; dev-boot requires formation work. |
+| 3 | Garbage Collection | Phase 1 | Low | Gardener runs the checks from Phase 1 plus golden principles. Includes board-scanner dispatch table change. |
+| 4 | Metrics and Feedback Loops | — | Low | Produces the data needed to justify Phase 5. Includes board-scanner logging change. |
+| 5 | Graduated Autonomy | Phases 1, 4 | Medium | Requires proven enforcement + quality evidence. Includes `po_reviewer` hat behavior change and `botminter.yml` manifest extension. |
+| 6 | Application Legibility | — | Medium-High | Most complex. Structured test output is standalone; dev-boot requires formation alignment (ADR-0008). |
 
 Enforcement first. Autonomy only after quality infrastructure is proven. Legibility last because it's the most complex and least coupled to the other features.
 
@@ -503,9 +589,12 @@ Enforcement first. Autonomy only after quality infrastructure is proven. Legibil
 ## 9. References
 
 - OpenAI Harness Engineering (Feb 2026) — primary reference for enforcement-first agentic development
+- ADR-0001: ADR Process — governs where ADRs live (project repo)
 - ADR-0002: Shell Script Bridge — design pattern for check script contract (structured output from shell scripts)
 - ADR-0006: Directory Modules — convention that `file-size-limit` check enforces
 - ADR-0007: Domain-Command Layering — primary target for mechanical enforcement (`domain-layer-imports` check)
 - ADR-0008: Formation as Deployment Strategy — alignment point for dev-boot feature
-- `profiles/scrum-compact/botminter.yml` — manifest being extended with `autonomy` field
-- BotMinter project invariants (11 files) — existing prose invariants that gain an executable layer
+- `team/botminter.yml` — manifest being extended with `autonomy` field
+- `crates/bm/src/profile/manifest.rs` — `ProfileManifest` struct gaining `autonomy` field
+- `profile/team_repo.rs` (`read_team_repo_manifest()`) — runtime manifest read path
+- BotMinter project invariants (11 files in `projects/botminter/invariants/`) — existing prose invariants that gain an executable layer
