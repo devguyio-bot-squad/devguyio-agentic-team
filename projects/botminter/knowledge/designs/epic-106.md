@@ -3,294 +3,254 @@
 **Epic:** #106
 **Author:** bob (superman)
 **Date:** 2026-04-03
-**Status:** Draft (Revision 2 — addressing PR #107 feedback)
+**Status:** Draft (Revision 3 — addressing 6-point PR #107 rejection feedback)
 **Reference:** [OpenAI Harness Engineering (Feb 2026)](https://openai.com/index/harness-engineering/)
+
+---
+
+## Rejection Feedback Addressed
+
+This revision directly addresses the 6 rejection points from PR #107:
+
+1. **Planning history corrected** — Phase 1 used `ralph plan` with AgentSOP framework, not ad-hoc development. Planning methodology was in place from the start; what's messy is the artifact trail, not the process itself.
+2. **Scope explicitly defined** — Changes are BotMinter product features, delivered through the profile system. The current team dogfoods them. No ad-hoc team-repo edits.
+3. **Existing ADRs integrated** — All 11 ADRs in `.planning/adrs/` are referenced where relevant. New decisions follow ADR-0001 format.
+4. **Planning artifact mess addressed** — Section 5 proposes canonical artifact organization for the profile system.
+5. **Knowledge directory purpose clarified** — Knowledge remains on-demand context. Designs, plans, and ADRs get their own profile-level directories.
+6. **No upstream changes** — All configuration goes through `botminter.yml` (profile manifest) and profile directory structure. Zero changes to Ralph Orchestrator or `ralph.yml`.
 
 ---
 
 ## 1. Overview
 
-Transition BotMinter from its current supervised agentic SDLC (Tier 2 — AI-Driven) to a fully agentic SDLC (Tier 3 — AI-Autonomous), inspired by OpenAI's Harness Engineering methodology.
+### What This Epic Is
 
-OpenAI's Harness team shipped ~1M lines of production code in 5 months with **zero manually-written code** using 3 engineers (later 7). Their key insight:
+This is a **BotMinter product epic**. It adds features to BotMinter-the-framework that enable teams to run a fully agentic SDLC inspired by [OpenAI's Harness Engineering](https://openai.com/index/harness-engineering/) methodology. The `devguyio-agentic` team then **dogfoods** these features by adopting them through BotMinter's profile system.
 
-> *"When something failed, the fix was almost never 'try harder.' Human engineers always asked: 'what capability is missing, and how do we make it legible and enforceable for the agent?'"*
+### What This Epic Is NOT
 
-BotMinter has structural alignment with several Harness patterns (~65% defined, ~45% operationally realized). However, BotMinter itself was not built using its current agentic SDLC from day one — it evolved through multiple development methodology phases. An honest assessment of this history is essential for identifying the real gaps and designing the right transition.
+- NOT ad-hoc changes to the current team repo
+- NOT a divergence from the scrum-compact profile
+- NOT changes to Ralph Orchestrator (upstream project)
+
+### Why
+
+OpenAI's Harness team insight: *"When something failed, the fix was almost never 'try harder.' Human engineers always asked: 'what capability is missing, and how do we make it legible and enforceable for the agent?'"*
+
+BotMinter already has ~45% operational realization of Harness patterns (hat-based roles, agent-to-agent review, structured knowledge, rejection loops, board-driven dispatch). Six capability gaps remain. Closing them through the profile system means every BotMinter team benefits, not just ours.
+
+### Delivery Model
+
+```
+BotMinter Codebase (projects/botminter/)
+  └─ Profile enhancements (profiles/scrum-compact/)
+       └─ Profile extraction (bm init / bm hire)
+            └─ Team repo gets new capabilities
+                 └─ Agents use them immediately
+```
+
+Every feature ships in the scrum-compact profile. No separate "agentic-harness" profile is needed initially — the existing profile gains these capabilities as opt-in features. If the feature set diverges enough, a new profile can be forked later using BotMinter's existing profile infrastructure.
 
 ---
 
-## 2. Architecture: Current State vs Target State
+## 2. Architecture
 
 ### 2.1 BotMinter Development History
 
-BotMinter was NOT built using its own agentic SDLC from day one. Understanding how the product evolved through different methodology phases is critical for an honest gap analysis — each phase contributed different capabilities with different maturity levels.
+BotMinter evolved through four methodology phases. Understanding this is essential for honest gap analysis.
 
-#### Phase 1: Traditional Development (v0.01–v0.05, Feb 2026)
+#### Phase 1: Ralph-Orchestrated Development (v0.01–v0.05, Feb 2026)
 
-The foundational CLI and workspace model were built through conventional human-directed development. Ralph Orchestrator served as the execution engine, but there was no formal AI planning framework — the agent was directed interactively or via ad-hoc prompts.
+The foundational CLI and workspace model were built using **Ralph Orchestrator with `ralph plan` and the AgentSOP framework**. Planning methodology was in place from the start — `ralph plan` created specs based on AgentSOP, providing structured planning for each development cycle. While not all planning artifacts survived cleanly (some are scattered or in non-standard locations), the development was methodologically sound, not ad-hoc.
 
-**What was built:**
-- Core `bm` CLI (`init`, `hire`, `fire`, `sync`, `start`, `stop`, `status`, `chat`)
-- Profile system with embedded compile-time profiles
-- Workspace model (team repo + project submodules + file surfacing)
-- GitHub coordination (issues, milestones, labels, Projects v2 bootstrapping)
-- Two-layer runtime model (inner Ralph loop + outer team repo control plane)
-- E2E test harness with `libtest-mimic`
+**What was built:** Core `bm` CLI, profile system, workspace model, GitHub coordination, two-layer runtime, E2E test harness with `libtest-mimic`.
 
-**Development method:** Human-driven with Ralph as execution engine. No formal planning artifacts on disk. The retrospective confirms: *"Phases 2-4 had no GSD plans on disk: These phases were implemented before GSD was initialized"* (`.planning/RETROSPECTIVE.md`).
-
-**Maturity:** High — 471 tests (327 unit + 49 cli_parsing + 95 integration) by the end of this phase. Core CLI commands battle-tested through real operational use.
+**Maturity:** High — 471 tests by end of this phase. Core commands battle-tested through real use.
 
 #### Phase 2: GSD Framework (v0.06–v0.07, Mar 2026)
 
-[GSD (Get Shit Done)](https://github.com/gsd-build/get-shit-done) introduced the first structured AI planning methodology: milestone decomposition into phases and plans (`PLAN.md` files with YAML frontmatter), a five-step CLI-agent handshake, verification loops with `must_haves` contracts, and parallel worktree execution.
+[GSD (Get Shit Done)](https://github.com/gsd-build/get-shit-done) introduced milestone decomposition, `PLAN.md` files, five-step CLI-agent handshake, and verification loops. Note: the retrospective records that *"Phases 2-4 had no GSD plans on disk: These phases were implemented before GSD was initialized"* — meaning GSD was adopted mid-milestone, not from v0.06's start.
 
-**What was built:**
-- Coding-agent-agnostic architecture with inline agent tags
-- Composable skills system (board-scanner, status-workflow, github-project)
-- `bm chat` and `bm minty` interactive assistant with 4 skills
-- Bridge abstraction (Telegram, Rocket.Chat, Tuwunel/Matrix)
-- Profile integration for bridges, credential store with keyring backend
-- 399 files changed, 34k insertions across v0.06 alone
+**What was built:** Coding-agent-agnostic architecture, composable skills, `bm chat`/`bm minty`, bridge abstraction, profile integration for bridges.
 
-**Development method:** Agent-driven with GSD-structured planning. Each phase had formal `PLAN.md` files, verification checks, and UAT gap closure. *"First milestone using GSD workflow; UAT gap closure pattern established"* (`.planning/RETROSPECTIVE.md`).
+**Maturity:** Medium-High — 576 tests by end of v0.07. Bridge lifecycle validated via e2e and exploratory tests.
 
-**Maturity:** Medium-High — 576 tests by end of v0.07. Bridge lifecycle validated via e2e and exploratory tests on an isolated test user account.
+#### Phase 3: Agent SOP / Ralph Hat System (evolving)
 
-#### Phase 3: Agent SOP / Ralph Hat System (concurrent with late GSD, evolving)
+Ralph's hat definitions were progressively formalized into structured SOPs. Each hat's `instructions` block in the profile's `ralph.yml` functions as a codified SOP. This is when informal practices became machine-readable hat instructions.
 
-Ralph's hat definitions were progressively formalized as structured standard operating procedures. The Ralph system prompt defines a strict ORIENTATION - STATE MANAGEMENT - PLAN - DELEGATE - HATS - DONE cycle. Each hat's `instructions` block in `ralph.yml` functions as a codified SOP for that role — the "Agent SOP" phase is when these informal practices were encoded into machine-readable hat instructions.
+**What was built:** Board scanner, 18 hat definitions, event-driven dispatch, status graph (32 statuses), evidence gates, human review gates.
 
-**What was built:**
-- Board scanner procedure (auto-injected skill, not a hat)
-- 18 hat definitions with structured instructions in `ralph.yml`
-- Event-driven dispatch via `ralph emit` and hat chaining
-- Status graph with 32 statuses and defined transitions
-- Evidence gates and backpressure quality enforcement
-- Human review gates (po:design-review, po:plan-review, po:accept)
-
-**Development method:** Iterative formalization — human and agent collaboration encoding process knowledge into hat instructions and event topology. Not built by the hats themselves, but by humans and agents encoding operational procedures into the team repo.
-
-**Maturity:** Medium — the hat system is functional and has been running for weeks, but some hats have been exercised significantly more than others.
+**Maturity:** Medium — functional for weeks, some hats more exercised than others.
 
 #### Phase 4: A-Team / Dogfooding (Late Mar 2026–present)
 
-The current `devguyio-agentic` team IS the "A-Team" — a team created using BotMinter's own `bm init` workflow, running the `scrum-compact` profile, with `superman-bob` wearing all 18 hats to develop BotMinter itself. This is the self-bootstrapping/dogfooding phase.
+The `devguyio-agentic` team was created using BotMinter's own `bm init` workflow, running scrum-compact, with superman-bob developing BotMinter itself.
 
-**What it validates:**
-- Full issue lifecycle (triage - design - plan - breakdown - implement - review - verify - done)
-- Hat switching within a single superman agent
-- Human gates via GitHub comments (supervised mode)
-- Board-driven dispatch and auto-advance transitions
-- Knowledge resolution across 5 scoping levels
+**What it validates:** Full issue lifecycle, hat switching, human gates, board dispatch, knowledge resolution.
 
-**Development method:** BotMinter developing BotMinter. The team repo tracks issues on GitHub Projects v2; superman-bob processes them through the hat-based SDLC.
+**Maturity:** Early — running approximately one week. Design and triage exercised; full TDD story cycle not yet validated end-to-end.
 
-**Maturity:** Early — the A-Team has been running for approximately one week. Design and triage workflows have been exercised; the full story implementation cycle (TDD - implement - code review - verify) has not yet been validated end-to-end.
+#### Planning Artifacts: Current State
 
-### 2.2 Current Capabilities Inventory
+The planning landscape reflects this evolution. Multiple techniques were tried, resulting in artifacts scattered across different structures:
 
-The following table maps each capability to its origin phase and assessed maturity level:
+| Location | Contents | Origin |
+|----------|----------|--------|
+| `projects/botminter/.planning/adrs/` | 11 ADRs (7 accepted, 3 proposed) | AgentSOP/Phase 1-2 |
+| `projects/botminter/.planning/phases/` | GSD phase plans (07-10) | GSD/Phase 2 |
+| `projects/botminter/.planning/milestones/` | Milestone plans (v0.06) | GSD/Phase 2 |
+| `projects/botminter/.planning/specs/` | Formal specifications | AgentSOP/Phase 1-2 |
+| `projects/botminter/specs/` | Feature specs (github-app-identity, team-design-skills) | Phase 3 |
+| `team/projects/botminter/knowledge/designs/` | Design docs (this file) | Phase 4/A-Team |
+| `team/agreements/decisions/` | Empty (scaffolded) | Phase 4/A-Team |
 
-| Capability | Origin Phase | Maturity | Notes |
-|---|---|---|---|
-| Core CLI (`init`, `hire`, `sync`, `start`, `stop`) | Traditional (v0.01-v0.05) | High | Battle-tested, 576+ tests |
-| Profile system (embedded, compile-time) | Traditional (v0.01-v0.05) | High | 2 profiles (scrum, scrum-compact) |
-| Workspace model (team repo + project submodules) | Traditional (v0.01-v0.05) | High | Proven in production use |
-| GitHub coordination (issues, milestones, Projects v2) | Traditional (v0.01-v0.05) | High | Operational since Feb 2026 |
-| Coding-agent-agnostic architecture | GSD (v0.06) | High | Agent tags, filtered extraction |
-| Skills system (composable, two-level scoping) | GSD (v0.06) | Medium-High | 10+ skills in active use |
-| Bridge abstraction (Telegram, RC, Matrix) | GSD (v0.07) | Medium-High | E2E + exploratory tested |
-| Interactive assistant (`bm chat`, `bm minty`) | GSD (v0.06) | Medium | 4 Minty skills |
-| Board scanner + status-driven dispatch | SOP/Hats (evolving) | Medium | Functional, exercised across multiple scan cycles |
-| 18 hat definitions (PO, arch, dev, QE, SRE, CW, lead) | SOP/Hats (evolving) | Medium | Some hats (po_backlog, arch_designer) more exercised than others (sre_setup, cw_writer) |
-| Knowledge hierarchy (5 scoping levels) | SOP/Hats (evolving) | Medium | Structure proven, content depth varies by area |
-| Invariant system (team, project, member levels) | SOP/Hats (evolving) | Low-Medium | Prose-only, no mechanical enforcement |
-| Rejection loops at review gates | A-Team (dogfooding) | Low-Medium | Exercised a few times during dogfooding |
-| TDD-first story workflow | A-Team (dogfooding) | Low | Defined in hat instructions but not yet fully validated end-to-end |
-| Bug triage (simple vs complex paths) | A-Team (dogfooding) | Low | Defined but untested end-to-end |
+This fragmentation is acknowledged as a problem. Section 5 addresses artifact organization.
 
-### 2.3 Harness Pattern Alignment (Honest Assessment)
+### 2.2 Existing ADRs
 
-This table maps Harness Engineering patterns to BotMinter equivalents, with an honest maturity assessment distinguishing between what is structurally defined vs. operationally proven.
+The 11 existing ADRs (`.planning/adrs/`) inform this design:
 
-| Harness Pattern | BotMinter Equivalent | Structural Alignment | Operational Maturity |
-|---|---|---|---|
-| Agent specialization | 18 hats (PO, arch, dev, QE, SRE, CW, lead) | Strong | Medium — defined and functional but most hats have limited operational history |
-| Agent-to-agent review | `lead_reviewer` - `dev_code_reviewer` - `qe_verifier` chain | Strong | Low-Medium — review chain defined, exercised only a handful of times |
-| AGENTS.md as table of contents | CLAUDE.md - `team/knowledge/`, invariants, hat knowledge | Strong | High — knowledge entry point pattern well-established |
-| Structured docs as system of record | `team/knowledge/` with 5-level scoping | Moderate | Medium — structure exists, content depth varies |
-| Architectural constraints via rules | `team/invariants/`, project invariants, member invariants | Weak | Low — invariants are prose markdown, no mechanical enforcement |
-| Plans as first-class artifacts | Design docs in `team/projects/<project>/knowledge/designs/` | Weak | Low — designs exist but no execution plans, progress logs, or tech debt tracking |
-| Feedback loops (review - reject - revise) | Rejection loops at every gate | Moderate | Low-Medium — loops defined, exercised a few times |
-| Declarative workflow (status-driven dispatch) | Board scanner + status graph + hat dispatch | Strong | Medium — operational for weeks, handles auto-advance and human gates |
-| Self-review chain ("Ralph Wiggum Loop") | `dev_implementer` - `dev_code_reviewer` - `qe_verifier` | Strong | Low — defined in hat instructions but full chain not yet validated |
-| Repository as single source of truth | `team/` repo as control plane + project repos for code | Strong | High — proven since project inception |
+| ADR | Title | Relevance to This Epic |
+|-----|-------|----------------------|
+| 0001 | ADR Format: Spotify-style with Anti-patterns | New decisions in this epic follow this format |
+| 0002 | Shell Script Bridge with YAML Manifest | Pattern reference for executable invariant checks (shell scripts + YAML config) |
+| 0004 | Scenario-Based E2E Tests | Informs test approach for new features |
+| 0005 | E2E Test Environment and Isolation | Informs dev-boot and observability stack isolation |
+| 0006 | Directory Modules Only | Architecture layer checks must respect this convention |
+| 0007 | Domain Modules and Command Layering | Architecture layer definitions derive from this |
+| 0008 | Formation as Deployment Strategy | Dev-boot scripts align with the formation abstraction |
+| 0009 | Exploratory Integration Tests | Gardener checks complement (not replace) exploratory tests |
 
-**Overall alignment: ~45% operationally realized, ~65% structurally defined.** The gap between "structurally defined" and "operationally realized" is the maturity gap — many patterns are encoded in hat instructions and process docs but have limited real-world validation. This maturity gap must be addressed alongside the six architectural gaps below.
+ADRs 0003, 0010, 0011 are not directly affected by this epic.
 
-### 2.4 The Six Gaps
+### 2.3 The Six Gaps (as BotMinter Features)
 
 ```
-Current State                          Target State
------------                            -----------
-Prose invariants (honor system)   -->  Mechanical enforcement (CI lints + structural tests)
-No telemetry access               -->  Per-worktree observability (logs/metrics/traces)
-No automated cleanup              -->  Garbage collection (gardener hat + golden principles)
-Designs only, no exec plans       -->  Plans as first-class artifacts (active/completed/debt)
-3 hard human gates                -->  Graduated autonomy (supervised/guided/autonomous)
-No metrics                        -->  Cycle-time + quality tracking + data-driven retros
+Gap                              BotMinter Feature
+---                              -----------------
+Prose invariants (honor system)  → Executable invariant checks in profiles
+No telemetry / app boot          → Dev environment bootstrapping in profiles
+No automated cleanup             → Gardener hat + golden principles in profiles
+No execution plans / messy docs  → Canonical artifact directories in profiles
+3 hard human gates               → Graduated autonomy config in botminter.yml
+No metrics                       → Transition metrics infrastructure in profiles
 ```
 
-**Note:** These gaps are assessed against Harness Engineering's validated patterns. Closing them requires not just building the features but also achieving sufficient operational maturity — each gap has a "build it" component and a "prove it works" component. The phased implementation plan (Section 8) accounts for this by recommending operational stabilization before advancing to higher-risk changes.
+Each gap maps to a BotMinter product feature that ships through the profile system and is dogfooded by this team.
+
+### 2.4 Where Changes Go
+
+| Change Type | Where | Example |
+|-------------|-------|---------|
+| Profile directory templates | `profiles/scrum-compact/` | New `checks/`, `plans/`, `metrics/` dirs |
+| Profile manifest schema | `botminter.yml` + `manifest.rs` | Add `autonomy` field |
+| Hat definitions | `profiles/scrum-compact/roles/superman/ralph.yml` | Add gardener hat |
+| CLI features (if needed) | `crates/bm/src/` | `bm check` command |
+| Team repo (via extraction) | Extracted by `bm init` / `bm hire` | Teams get new dirs automatically |
+| ADRs for this epic's decisions | `projects/botminter/.planning/adrs/` | Follow ADR-0001 format |
+
+**Nothing touches Ralph Orchestrator.** Ralph reads what the profile provides.
 
 ---
 
 ## 3. Components and Interfaces
 
-### 3.1 Gap 1: Mechanical Enforcement
+### 3.1 Feature 1: Executable Invariant Checks
 
 #### Problem
-Invariants are markdown documents (`team/invariants/`, `team/projects/<project>/invariants/`). Agents are *instructed* to follow them. Nothing prevents violations from reaching code review.
+Invariants are markdown documents in `team/invariants/`. Agents are *instructed* to follow them. Nothing prevents violations from reaching code review.
 
-Harness's approach: *"Custom linters and structural tests enforce layered architecture. Lint error messages are written for agents — they inject remediation instructions into context."*
+#### Scope: Profile Enhancement
+The scrum-compact profile gains an executable invariant check system. Checks are shell scripts in the profile's `invariants/checks/` directory, extracted to the team repo on `bm init`. Hats already in the profile (`dev_code_reviewer`, `qe_verifier`) gain check-running steps in their instructions.
 
 #### Design
 
-**3.1.1 Architecture Layers Definition**
+**Profile-side (what ships in `profiles/scrum-compact/`):**
 
-Each project defines its allowed dependency layers in a machine-readable YAML file:
-
-```yaml
-# team/projects/botminter/invariants/architecture-layers.yml
-layers:
-  - name: types
-    description: "Pure types/interfaces — no imports from other layers"
-    allowed_imports: []
-  - name: config
-    description: "Configuration — imports types only"
-    allowed_imports: [types]
-  - name: repository
-    description: "Data access — imports types, config"
-    allowed_imports: [types, config]
-  - name: service
-    description: "Business logic — imports types, config, repo"
-    allowed_imports: [types, config, repository]
-  - name: runtime
-    description: "Application bootstrap — imports all above"
-    allowed_imports: [types, config, repository, service]
-  - name: ui
-    description: "Presentation — imports all above"
-    allowed_imports: [types, config, repository, service, runtime]
-
-cross_cutting:
-  - name: providers
-    description: "Auth, connectors, telemetry, feature flags — enter through single interface"
-    accessible_from: [service, runtime, ui]
+```
+profiles/scrum-compact/
+  invariants/
+    checks/                        # Executable checks (NEW)
+      check-test-coverage.sh       # Minimum coverage thresholds
+      check-naming-conventions.sh  # Validates naming patterns
+      README.md                    # How to add project-specific checks
+    code-review-required.md        # Existing prose invariant
+    test-coverage.md               # Existing prose invariant
 ```
 
-**3.1.2 Executable Invariant Checks**
-
-Convert the top prose invariants into executable scripts:
+**Project-side (added by teams to their project config):**
 
 ```
 team/projects/<project>/invariants/
-  architecture-layers.yml          # Layer definitions (new)
-  checks/                          # Executable checks (new)
+  architecture-layers.yml          # Project-specific layer definitions
+  checks/                          # Project-specific checks
     check-architecture-layers.sh   # Validates import directions
-    check-structured-logging.sh    # Enforces structured log format
-    check-naming-conventions.sh    # Validates naming patterns
-    check-file-size-limits.sh      # Flags oversized files
-    check-test-coverage.sh         # Minimum coverage thresholds
-  design-quality.md                # Existing (remains as reference)
 ```
 
-Each check script:
-- Exits 0 on pass, 1 on failure
-- On failure, prints **agent-readable remediation instructions** (not just "failed")
-- Example error output:
+Architecture layers follow ADR-0007's domain-command layering. The check script validates that command modules don't import from other command modules, and domain modules respect the dependency hierarchy defined in the project's `architecture-layers.yml`.
+
+**Check script contract:**
+- Exit 0 on pass, 1 on failure
+- On failure, print agent-readable remediation (following Harness's pattern):
   ```
-  VIOLATION: service/auth.rs imports ui/components.rs
-  LAYER RULE: 'service' layer must not import from 'ui' layer
-  REMEDIATION: Move the shared type to 'types/' layer, then import from there.
-  See: team/projects/botminter/invariants/architecture-layers.yml
+  VIOLATION: <what happened>
+  RULE: <which rule>
+  REMEDIATION: <what to do>
+  REFERENCE: <path to invariant>
   ```
 
-**3.1.3 Integration Points**
+**Hat integration (profile-side, in role's `ralph.yml`):**
+- `dev_code_reviewer` instructions: "Before reviewing, run all scripts in `team/invariants/checks/` and `team/projects/<project>/invariants/checks/`. If any check fails, reject to `dev:implement` with the check output."
+- `qe_verifier` instructions: Same check execution as part of verification.
 
-- `dev_code_reviewer` hat runs all `checks/` scripts before reviewing
-- `qe_verifier` hat runs checks as part of verification
-- If any check fails, auto-reject back to `dev:implement` with the error output as feedback
-- CI pipeline runs checks on every PR
-
-**3.1.4 Custom Lint Error Messages**
-
-Following Harness: *"Because the lints are custom, we write the error messages to inject remediation instructions into agent context."*
-
-Every lint/check error message follows this template:
-```
-VIOLATION: <what happened>
-RULE: <which rule was violated>
-REMEDIATION: <exactly what to do to fix it>
-REFERENCE: <path to the invariant/knowledge file>
-```
+**Relationship to existing invariants:**
+- Prose invariants (`*.md`) remain as human-readable reference documentation
+- Executable checks (`checks/*.sh`) are the mechanical enforcement layer
+- Both co-exist in the same directory; hats read prose for context, run scripts for enforcement
 
 #### Acceptance Criteria
 
-- **Given** a code change that violates a defined architecture layer rule
-  **When** the `dev_code_reviewer` hat runs invariant checks
-  **Then** the check fails with an agent-readable remediation message and the story is rejected back to `dev:implement`
+- **Given** a code change violating an architecture layer rule
+  **When** `dev_code_reviewer` runs invariant checks
+  **Then** the check fails with agent-readable remediation and the story is rejected to `dev:implement`
 
-- **Given** a code change that passes all invariant checks
-  **When** the `dev_code_reviewer` hat runs invariant checks
+- **Given** a code change passing all checks
+  **When** `dev_code_reviewer` runs invariant checks
   **Then** all checks pass and review proceeds normally
 
-- **Given** a new invariant is added to `checks/`
+- **Given** a new check script added to `checks/`
   **When** subsequent code reviews run
-  **Then** the new check is automatically included without hat modifications
+  **Then** the new check is automatically included (convention-over-configuration via directory scan)
 
 ---
 
-### 3.2 Gap 2: Application Legibility
+### 3.2 Feature 2: Application Legibility (Phased)
 
 #### Problem
-QE investigates bugs by reading code and issue descriptions. No telemetry, no UI introspection. Agents can't observe runtime behavior.
+QE investigates bugs by reading code. No telemetry, no app boot, no runtime observation.
 
-Harness's approach: *"We made the app bootable per git worktree. We wired Chrome DevTools Protocol into the agent runtime. Logs, metrics, and traces are exposed via a local observability stack that's ephemeral for any given worktree."*
+#### Scope: Profile Enhancement (phased)
+Legibility features are introduced in phases of increasing complexity. Phase A is profile-level. Phases B-D are project-specific and optional.
 
-#### Design (Phased)
+#### Design
 
-**Phase A: Structured Test Output (All projects)**
+**Phase A: Structured Test Output (profile-level)**
 
-```
-team/projects/<project>/invariants/
-  test-output-format.yml           # Required test output structure
-```
+The profile defines a test output format invariant:
 
 ```yaml
-# test-output-format.yml
+# profiles/scrum-compact/invariants/test-output-format.yml
 requirements:
-  - format: structured_json        # Tests must output parseable results
-  - include:
-    - test_name
-    - status: [pass, fail, skip]
-    - duration_ms
-    - error_message                 # On failure
-    - file_path                     # Source location
-    - coverage_delta                # Optional
+  - format: structured_json
+  - fields: [test_name, status, duration_ms, error_message, file_path]
 ```
 
-- `qe_investigator` and `dev_implementer` parse structured test output
-- Test failures include stack traces and file locations agents can navigate
-- Coverage reports available as data, not just pass/fail
+Hats (`qe_investigator`, `dev_implementer`) parse structured output to navigate directly to failures. This is a convention the profile establishes — enforcement is via the prose invariant and code reviewer checks.
 
-**Phase B: Per-Worktree App Boot (Project-specific)**
+**Phase B: Dev-Boot Scripts (project-specific, optional)**
 
-- Projects that have a runnable app define a `dev-boot.sh` script
-- Script boots the app in isolation (unique port, ephemeral DB)
-- `sre_setup` hat provisions the environment
-- `dev_implementer` can boot the app to validate behavior
+Projects that have a runnable app define boot/teardown scripts:
 
 ```yaml
 # team/projects/<project>/knowledge/dev-environment.yml
@@ -298,29 +258,18 @@ boot:
   script: ./scripts/dev-boot.sh
   health_check: http://localhost:${PORT}/health
   teardown: ./scripts/dev-teardown.sh
-  isolation: worktree              # Each worktree gets its own instance
+  isolation: worktree
 ```
 
-**Phase C: Observability Stack (Project-specific)**
+This aligns with ADR-0008 (Formation as Deployment Strategy) — dev-boot uses the formation abstraction for local deployment.
 
-Ephemeral per-worktree observability following Harness's architecture:
+**Phase C: Observability Stack (project-specific, optional)**
 
-```
-App → Vector (log/metric/trace collector)
-       ├→ Victoria Logs  (queryable via LogQL)
-       ├→ Victoria Metrics (queryable via PromQL)
-       └→ Victoria Traces (queryable via TraceQL)
-```
+Ephemeral per-worktree observability. Deferred until Phase B is validated.
 
-- Stack spins up with `dev-boot.sh`, tears down with worktree
-- Agents query via standard APIs (LogQL, PromQL, TraceQL)
-- Enables prompts like: "ensure no span exceeds 2 seconds" or "find the error causing this bug"
+**Phase D: UI Introspection (web projects only, optional)**
 
-**Phase D: UI Introspection (Web projects only)**
-
-- Chrome DevTools Protocol integration
-- Agent capabilities: DOM snapshots, screenshots, navigation
-- `qe_verifier` can validate UI state and take before/after screenshots
+Chrome DevTools Protocol integration. Deferred until applicable project exists.
 
 #### Acceptance Criteria
 
@@ -330,398 +279,270 @@ App → Vector (log/metric/trace collector)
 
 - **Given** a project with `dev-environment.yml` configured
   **When** `dev_implementer` works in a worktree
-  **Then** the app boots in isolation and the agent can validate behavior against it
-
-- **Given** a worktree with observability stack running
-  **When** the agent queries logs for a specific error pattern
-  **Then** matching log entries are returned with timestamps and context
+  **Then** the app boots in isolation and the agent can validate behavior
 
 ---
 
-### 3.3 Gap 3: Garbage Collection (Entropy Management)
+### 3.3 Feature 3: Garbage Collection
 
 #### Problem
-No automated cleanup. No quality grading. No stale-doc detection. Over time, agent-generated patterns drift.
+No automated cleanup, quality grading, or stale-doc detection.
 
-Harness's experience: *"Our team used to spend every Friday (20% of the week) cleaning up 'AI slop.' Instead, we started encoding 'golden principles' and built a recurring cleanup process. Technical debt is like a high-interest loan."*
+#### Scope: Profile Enhancement
+A new `arch_gardener` hat is added to the superman role definition in the scrum-compact profile.
 
 #### Design
 
-**3.3.1 Quality Scoring**
-
-```markdown
-# team/projects/<project>/knowledge/QUALITY_SCORE.md
-
-## Quality Assessment — 2026-04-03
-
-| Domain | Test Coverage | Invariant Compliance | Code Patterns | Doc Freshness | Grade |
-|--------|--------------|---------------------|---------------|---------------|-------|
-| Auth   | 85%          | Pass                | Clean         | Current       | A     |
-| API    | 72%          | Pass                | 2 drift items | Stale (14d)   | B     |
-| UI     | 45%          | 1 violation         | 5 drift items | Stale (30d)   | C     |
-
-**Overall: B-**
-
-### Drift Items
-- [ ] API: duplicated validation helper in 3 locations
-- [ ] UI: inconsistent error handling pattern
-- [ ] API docs: doesn't reflect new endpoint added in #98
-```
-
-Updated weekly by the gardener process.
-
-**3.3.2 Golden Principles**
+**Gardener Hat (profile-side, in `roles/superman/ralph.yml`):**
 
 ```yaml
-# team/projects/<project>/invariants/golden-principles.yml
+arch_gardener:
+  purpose: "Periodic codebase cleanup and quality assessment"
+  triggers: ["gardener.scan"]
+  publishes: ["gardener.scan.done"]
+  instructions: |
+    1. Scan codebase against golden principles (team/projects/<project>/invariants/golden-principles.yml)
+    2. Run all invariant checks, note any new violations
+    3. Check doc freshness (git log dates vs knowledge file dates)
+    4. Update team/projects/<project>/knowledge/QUALITY_SCORE.md
+    5. Open targeted refactoring issues for drift items
+```
+
+**Golden Principles (profile-side, extracted to team repo):**
+
+```yaml
+# profiles/scrum-compact/invariants/golden-principles.yml
 principles:
   - name: shared-utilities-over-hand-rolled
     description: "Prefer shared utility packages over hand-rolled helpers"
-    detection: "Find functions with >80% similarity across different modules"
+    detection: "Find functions with >80% similarity across modules"
     remediation: "Extract to shared utility, update all call sites"
-
-  - name: validated-boundaries
-    description: "Validate data at boundaries, not YOLO-style deep in logic"
-    detection: "Find parse/deserialize calls without validation"
-    remediation: "Add boundary validation using typed schemas"
-
   - name: no-dead-code
     description: "Remove unused functions, imports, and variables"
     detection: "Static analysis for unreachable code"
     remediation: "Delete the dead code"
-
   - name: consistent-error-handling
     description: "Use the project's error handling pattern consistently"
     detection: "Find error handling that doesn't match project pattern"
     remediation: "Refactor to use standard error pattern"
 ```
 
-**3.3.3 Gardener Hat (`arch_gardener`)**
+**Quality Score (project-level knowledge):**
 
-New hat added to superman's hat roster:
+The gardener maintains `team/projects/<project>/knowledge/QUALITY_SCORE.md` with per-domain grades (A-F), test coverage, invariant compliance, and doc freshness. Updated on each gardener scan.
 
-```yaml
-# In ralph.yml hats section
-arch_gardener:
-  purpose: "Periodic codebase cleanup and quality assessment"
-  trigger: "Recurring schedule (weekly) or manual invocation"
-  workflow:
-    1. Scan codebase against golden principles
-    2. Run invariant checks, note any new violations
-    3. Check doc freshness (modified date vs code changes)
-    4. Update QUALITY_SCORE.md
-    5. Open targeted refactoring PRs for drift items (small, reviewable in <1 min)
-    6. Open fix-up PRs for stale docs
-```
-
-**3.3.4 Doc-Gardening**
-
-Integrated into the gardener hat:
-- Compare design docs against actual implementation
-- Flag knowledge files that reference deleted/renamed code
-- Check that PROCESS.md reflects current status graph
-- Open fix-up issues or PRs for stale content
+**Triggering:** The board scanner dispatches `gardener.scan` on a configurable schedule (e.g., after every N scan cycles, or when explicitly invoked). This is profile configuration, not a Ralph Orchestrator change.
 
 #### Acceptance Criteria
 
-- **Given** the gardener hat runs its weekly scan
-  **When** it detects duplicated utility code across modules
-  **Then** it opens a refactoring PR to extract the shared utility
+- **Given** the gardener hat runs its scan
+  **When** it detects duplicated utility code
+  **Then** it opens a refactoring issue describing the duplication and remediation
 
-- **Given** a design doc references a function that was renamed
+- **Given** a knowledge file references a renamed function
   **When** the doc-gardening scan runs
-  **Then** a fix-up PR is opened updating the reference
+  **Then** a fix-up issue is opened
 
-- **Given** the gardener hat completes its scan
+- **Given** the gardener completes its scan
   **When** it updates QUALITY_SCORE.md
-  **Then** the score reflects current test coverage, invariant compliance, and doc freshness
+  **Then** the score reflects current coverage, compliance, and doc freshness
 
 ---
 
-### 3.4 Gap 4: Plans as First-Class Artifacts
+### 3.4 Feature 4: Plans as First-Class Artifacts
 
 #### Problem
-Design docs exist as files. Story breakdowns exist only in issue comments. No execution plans with progress tracking. No tech-debt tracker.
+Design docs exist as files. Story breakdowns exist only in issue comments. No execution plans. Planning artifacts are fragmented across multiple locations and methodologies (AgentSOP specs, GSD plans, project specs, team designs).
 
-Harness's approach: *"Plans are treated as first-class artifacts. Complex work is captured in execution plans with progress and decision logs that are checked into the repository. Active plans, completed plans, and known technical debt are all versioned and co-located."*
+#### Scope: Profile Enhancement + Artifact Organization
+
+This feature serves double duty:
+1. Add execution plan infrastructure to the profile
+2. Establish canonical artifact organization that cleans up the mess
 
 #### Design
 
-**3.4.1 Knowledge Directory Extension**
+**Profile Directory Template (what `bm init` extracts):**
+
+The profile template for the `projects/<project>/` directory gains new subdirectories:
 
 ```
-team/projects/<project>/knowledge/
-  designs/                          # ✅ Already exists
-    epic-106.md                     # This document
-  plans/                            # 🆕
-    active/
-      epic-106-plan.md              # Execution plan with progress log
-    completed/
-      epic-24-plan.md               # Archived after epic completion
-  generated/                        # 🆕
-    board-snapshot.md                # Auto-generated board state
-    architecture-map.md             # Auto-generated from code analysis
-  product-specs/                    # 🆕
-    index.md                        # Product requirements catalog
-  references/                       # 🆕
-    harness-engineering.md          # External reference docs
-  QUALITY_SCORE.md                  # 🆕 (from Gap 3)
-  tech-debt-tracker.md              # 🆕
+team/projects/<project>/
+  knowledge/                        # On-demand context extras (EXISTING purpose preserved)
+    designs/                        # Design documents for epics
+    QUALITY_SCORE.md                # From Feature 3
+  plans/                            # Execution tracking (NEW)
+    active/                         # In-progress epic execution plans
+    completed/                      # Archived after epic completion
+  invariants/                       # Hard constraints (EXISTING purpose preserved)
+    checks/                         # Executable checks (from Feature 1)
+    architecture-layers.yml         # Project-specific layers
+    golden-principles.yml           # From Feature 3
 ```
 
-**3.4.2 Execution Plan Format**
+**Key design decision — What goes where:**
+
+| Artifact Type | Location | Rationale |
+|---------------|----------|-----------|
+| Knowledge (conventions, protocols, references) | `knowledge/` | On-demand context extras — original purpose preserved |
+| Design docs (epic designs) | `knowledge/designs/` | Designs are context for implementation work |
+| Execution plans (progress tracking) | `plans/active/` or `plans/completed/` | Plans are living documents that track execution state |
+| Invariants (hard constraints) | `invariants/` | Machine-readable and prose constraints |
+| ADRs (architecture decisions) | Project repo `.planning/adrs/` | ADRs belong with the codebase they govern (per ADR-0001) |
+| Team agreements (decisions, retros, norms) | `agreements/` | Team-level governance (per team-agreements convention) |
+
+**Why knowledge/ is correct for designs:** Designs are reference context that hats load on demand during implementation. They are not governance documents (that's `invariants/`) or execution state (that's `plans/`). The operator's concern that knowledge was meant for "on demand context extras" is exactly what designs are — context loaded by the architect, planner, and implementer hats as needed.
+
+**Why ADRs stay in the project repo:** ADRs document *codebase* decisions. They live with the code in `.planning/adrs/` following the established ADR-0001 format. They don't belong in the team repo because they're project-specific architectural artifacts, not team governance.
+
+**Execution Plan Format:**
 
 ```markdown
-# Execution Plan: Epic #106 — Agentic SDLC Transition
+# Execution Plan: Epic #<number> — <title>
 
-## Status: In Progress
+## Status: In Progress | Completed
 
 ## Stories
 | # | Title | Status | Completed |
 |---|-------|--------|-----------|
-| 1 | Mechanical enforcement | dev:implement | — |
-| 2 | Plans structure | qe:test-design | — |
 
 ## Decision Log
 | Date | Decision | Rationale |
 |------|----------|-----------|
-| 2026-04-03 | Start with enforcement | Lowest risk, highest impact |
-| 2026-04-05 | Skip Phase D for now | No web UI project yet |
 
 ## Progress Notes
-- 2026-04-03: Epic created, design doc produced
-- 2026-04-04: Design approved, planning started
+- <date>: <event>
 ```
 
-**3.4.3 Tech Debt Tracker**
-
-```markdown
-# Tech Debt Tracker
-
-## Active Debt
-
-| ID | Description | Source | Priority | Effort |
-|----|-------------|--------|----------|--------|
-| TD-001 | Duplicated validation in API module | Epic #98 | Medium | 2h |
-| TD-002 | Missing error handling in auth flow | Bug #105 | High | 4h |
-
-## Resolved
-| ID | Description | Resolved By | Date |
-|----|-------------|-------------|------|
-```
-
-**3.4.4 Hat Integration**
-
-- `arch_planner` writes execution plans to `plans/active/`, not just issue comments
-- `arch_monitor` updates progress in the plan file as stories complete
-- On epic completion, `arch_monitor` moves plan to `plans/completed/`
-- `dev_implementer` logs discovered tech debt to `tech-debt-tracker.md`
-- `arch_gardener` processes the debt tracker periodically
+**Hat Integration (profile-side):**
+- `arch_planner` writes execution plans to `team/projects/<project>/plans/active/`
+- `arch_monitor` updates plan progress as stories complete
+- On epic completion, plan moves to `plans/completed/`
 
 #### Acceptance Criteria
 
-- **Given** the `arch_planner` hat produces a story breakdown
+- **Given** `arch_planner` produces a story breakdown
   **When** the breakdown is approved
-  **Then** an execution plan file exists in `plans/active/` with story list and status
+  **Then** an execution plan exists in `plans/active/` with the story list
 
-- **Given** a story reaches `done` status
+- **Given** a story reaches `done`
   **When** `arch_monitor` scans the epic
-  **Then** the execution plan's story table is updated to reflect completion
+  **Then** the execution plan's story table is updated
 
 - **Given** all stories in an epic reach `done`
   **When** the epic is accepted
-  **Then** the plan file moves from `plans/active/` to `plans/completed/`
+  **Then** the plan moves from `plans/active/` to `plans/completed/`
 
 ---
 
-### 3.5 Gap 5: Graduated Autonomy
+### 3.5 Feature 5: Graduated Autonomy
 
 #### Problem
-3 hard human gates (`po:design-review`, `po:plan-review`, `po:accept`). Agent cannot proceed without explicit human approval. This is the biggest bottleneck.
+3 hard human gates. Agent cannot proceed without explicit human approval at design review, plan review, and acceptance.
 
-Harness's evolution: *"Humans may review pull requests, but aren't required to. Over time, we've pushed almost all review effort towards being handled agent-to-agent."*
+#### Scope: BotMinter Profile Manifest Enhancement
+
+Autonomy configuration goes in `botminter.yml` — the BotMinter profile manifest. **NOT in `ralph.yml`** (that's Ralph Orchestrator, an upstream project we consume). The profile extraction pipeline reads the autonomy setting from `botminter.yml` and configures the hat behavior accordingly.
 
 #### Design
 
-**3.5.1 Trust Tiers**
+**Profile Manifest Extension:**
 
 ```yaml
-# ralph.yml — per-project autonomy configuration
-projects:
-  botminter:
-    autonomy: supervised    # supervised | guided | autonomous
-
-# Tier definitions:
-# supervised (current default):
-#   - 3 human gates: po:design-review, po:plan-review, po:accept
-#   - Agent waits for human comment at each gate
-#   - Human must explicitly approve or reject
-#
-# guided:
-#   - 1 human gate: po:accept only
-#   - lead_reviewer approval auto-advances design and plan reviews
-#   - po:design-review → auto-advance after lead:design-review passes
-#   - po:plan-review → auto-advance after lead:plan-review passes
-#   - Human gets async notification of auto-advances
-#   - Human can still intervene by commenting on any issue
-#
-# autonomous:
-#   - 0 human gates (async notification only)
-#   - All gates auto-advance after agent review passes
-#   - Human reviews async via board/notifications
-#   - Human can intervene at any time by commenting
+# profiles/scrum-compact/botminter.yml (new field)
+autonomy:
+  default: supervised              # Default for new teams using this profile
+  tiers:
+    supervised:
+      description: "3 human gates: design-review, plan-review, accept"
+      human_gates: [po:design-review, po:plan-review, po:accept]
+    guided:
+      description: "1 human gate: accept only"
+      human_gates: [po:accept]
+      auto_advance_after: lead_review  # Auto-advance design/plan after lead review
+    autonomous:
+      description: "0 human gates, async notification"
+      human_gates: []
+      notification: true           # Post notification comments on auto-advance
 ```
 
-**3.5.2 `po_reviewer` Hat Modification**
+**Implementation in `manifest.rs`:**
 
-The `po_reviewer` hat checks the project's autonomy tier before gating:
+The `ProfileManifest` struct gains an `autonomy` field. During extraction, the autonomy setting is written to a team-repo-level config file that hats can read at runtime (e.g., `team/.botminter-config.yml`).
 
-```
-# Pseudocode for po_reviewer decision
-if autonomy == "supervised":
-    # Current behavior: post review request, wait for human comment
-    post_review_request()
-    wait_for_human_response()
+**Hat Behavior (profile-side, in `roles/superman/ralph.yml`):**
 
-elif autonomy == "guided":
-    if gate == "po:accept":
-        # Still requires human
-        post_review_request()
-        wait_for_human_response()
-    else:
-        # Auto-advance after lead review passed
-        post_notification_comment("Auto-approved (guided mode). Lead review passed.")
-        auto_advance()
+The `po_reviewer` hat instructions check the autonomy tier:
+- `supervised`: Current behavior — post review request, wait for human comment
+- `guided`: Auto-advance design and plan reviews after lead approval. Wait for human only at `po:accept`. Post notification comment on each auto-advance.
+- `autonomous`: Auto-advance all gates. Post notification comments. Human can override by commenting `Rejected: <feedback>` at any time.
 
-elif autonomy == "autonomous":
-    # Auto-advance all gates
-    post_notification_comment("Auto-approved (autonomous mode). Agent review passed.")
-    auto_advance()
-```
+**Override Mechanism:**
+- Human comments `Rejected: <feedback>` → reverts auto-advance
+- Human comments `Hold` → pauses auto-advances for that issue
+- Human changes autonomy setting → requires profile re-sync (`just sync` or re-extraction)
 
-**3.5.3 Notification Comments**
-
-When auto-advancing, the agent posts a notification comment so the human has an audit trail:
-
-```markdown
-### 📝 po — 2026-04-05T10:30:00Z
-
-**Auto-approved (guided mode)**
-
-Design review auto-advanced after lead review passed.
-Lead review: approved by 👑 lead at 2026-04-05T10:25:00Z
-
-To override: comment `Rejected: <feedback>` to revert.
-```
-
-**3.5.4 Override Mechanism**
-
-Even in `guided` or `autonomous` mode, the human can intervene at any time:
-- Comment `Rejected: <feedback>` on any issue to revert the most recent auto-advance
-- Comment `Hold` to pause auto-advances for a specific issue
-- Change the `autonomy` setting in `ralph.yml` to downgrade the tier
+**Why botminter.yml, not ralph.yml:** Ralph Orchestrator is an upstream project. Its `ralph.yml` defines the event loop, hats, skills, and iteration config. Autonomy is a BotMinter-level policy that determines how hats behave — it's a profile concern, not an orchestrator concern. The profile's hat instructions read the autonomy setting and adjust their behavior. Ralph just runs whatever instructions the hat provides.
 
 #### Acceptance Criteria
 
-- **Given** a project configured with `autonomy: guided`
+- **Given** a project with `autonomy: guided` in `botminter.yml`
   **When** lead review approves a design doc
-  **Then** `po:design-review` auto-advances to `arch:plan` with a notification comment
+  **Then** `po:design-review` auto-advances with a notification comment
 
-- **Given** a project configured with `autonomy: guided`
+- **Given** `autonomy: guided`
   **When** an epic reaches `po:accept`
-  **Then** the agent posts a review request and waits for human comment (same as supervised)
-
-- **Given** a project configured with `autonomy: autonomous`
-  **When** any gate is reached
-  **Then** the agent auto-advances with a notification comment and the human can override
+  **Then** the agent waits for human comment (same as supervised)
 
 - **Given** a human comments `Rejected: <feedback>` on an auto-advanced issue
   **When** the agent scans the issue
-  **Then** the status reverts and the feedback is processed
+  **Then** the status reverts and feedback is processed
 
 ---
 
-### 3.6 Gap 6: Metrics and Feedback Loops
+### 3.6 Feature 6: Metrics and Feedback Loops
 
 #### Problem
-No cycle-time tracking. No quality metrics. No way to know if the process is improving. `poll-log.txt` exists for board scan audit but provides no analytics.
+No cycle-time tracking, quality metrics, or data-driven retrospectives. `poll-log.txt` exists for audit but provides no analytics.
 
-Harness's approach: They track quality grades per domain over time and measure throughput (3.5 PRs/engineer/day).
+#### Scope: Profile Enhancement
+
+The profile gains metrics infrastructure — directory templates, transition logging instructions for the board scanner, and a report generation capability.
 
 #### Design
 
-**3.6.1 Transition Timestamps**
+**Profile Directory Template:**
 
-Board scanner logs every status transition to a JSONL file:
+```
+team/metrics/                       # NEW directory from profile
+  transitions.jsonl                 # Append-only transition log
+  reports/                          # Weekly auto-generated reports
+```
+
+**Transition Logging:**
+
+The board scanner skill (auto-injected, not a hat) appends a JSONL entry after each status transition:
 
 ```jsonl
 {"issue":106,"type":"Epic","from":"po:triage","to":"po:backlog","ts":"2026-04-03T15:00:00Z","hat":"po_backlog"}
-{"issue":107,"type":"Task","from":"qe:test-design","to":"dev:implement","ts":"2026-04-03T15:05:00Z","hat":"qe_test_designer"}
 ```
 
-Location: `team/metrics/transitions.jsonl` (append-only)
+This is an additive change to the board-scanner skill instructions in the profile. The skill already posts comments and logs to `poll-log.txt`; adding JSONL append is minimal.
 
-**3.6.2 Derived Metrics**
+**Derived Metrics:**
 
-Computed from the transition log:
+| Metric | Measures | Target |
+|--------|----------|--------|
+| Design cycle time | `arch:design` → `po:ready` | Trending down |
+| Implementation cycle time | `dev:implement` → `qe:verify` | Trending down |
+| Human gate wait time | Time in review statuses | < 4 hours |
+| Rejection rate per gate | % rejections | < 15% |
+| First-pass rate | Stories reaching `done` without rejection | > 70% |
+| Throughput | Issues completed per week | Trending up |
 
-| Metric | What It Measures | Target |
-|--------|-----------------|--------|
-| Design cycle time | `arch:design` to `po:ready` | Trending down |
-| Implementation cycle time | `dev:implement` to `qe:verify` | Trending down |
-| Human gate wait time | Time in `po:design-review`, `po:plan-review`, `po:accept` | < 4 hours |
-| Rejection rate per gate | % of times each gate rejects | < 15% |
-| First-pass rate | % of stories that reach `done` without any rejection | > 70% |
-| Throughput | Issues completed per day/week | Trending up |
-| Bug escape rate | Bugs filed within 30 days of epic completion | Trending down |
+**Weekly Report:**
 
-**3.6.3 Weekly Quality Report**
-
-Auto-generated, stored in `team/metrics/`:
-
-```markdown
-# Weekly Report — 2026-04-07
-
-## Throughput
-- Issues completed: 12
-- PRs merged: 8
-- Epics advanced: 2
-
-## Cycle Times (median)
-- Design → Ready: 3.2 days (prev: 4.1 days, -22%)
-- Implement → Verify: 1.1 days (prev: 1.5 days, -27%)
-
-## Gates
-- Human gate wait time (median): 6.2 hours
-- Rejection rate: 18% (target: <15%)
-  - Code review: 25% (↑ — investigate)
-  - QE verify: 12% (✓)
-
-## Quality
-- Invariant violations caught pre-review: 4
-- Invariant violations reaching review: 0 (✓)
-- Test coverage delta: +3.2%
-
-## Action Items
-- Code review rejection rate is above target. Review top rejection reasons.
-```
-
-**3.6.4 Retrospective Integration**
-
-The existing `retrospective` skill receives metrics as input:
-- Instead of "what went well?" → "design review took 3x longer on epic #24 than #18 — here's why"
-- Data-driven action items backed by measured trends
-- Retro outputs stored in `team/agreements/retros/` per existing convention
-
-**3.6.5 Board Scanner Integration**
-
-The board scanner (`board-scanner` skill) adds a single line per transition:
-
-```bash
-# In board scanner, after each status transition
-echo '{"issue":'$ISSUE',"type":"'$TYPE'","from":"'$FROM'","to":"'$TO'","ts":"'$(date -u +%FT%TZ)'","hat":"'$HAT'"}' \
-  >> team/metrics/transitions.jsonl
-```
+A `cw_writer` hat task (or gardener hat extension) generates a weekly summary from `transitions.jsonl`, stored in `team/metrics/reports/`. The existing `retrospective` skill receives metrics as input for data-driven retros.
 
 #### Acceptance Criteria
 
@@ -731,75 +552,62 @@ echo '{"issue":'$ISSUE',"type":"'$TYPE'","from":"'$FROM'","to":"'$TO'","ts":"'$(
 
 - **Given** a week of transition data exists
   **When** the weekly report generator runs
-  **Then** a report is produced with cycle times, rejection rates, and throughput
+  **Then** a report shows cycle times, rejection rates, and throughput
 
 - **Given** the retrospective skill is invoked
   **When** metrics data is available
-  **Then** the retro includes data-driven observations and specific action items
+  **Then** the retro includes data-driven observations
 
 ---
 
 ## 4. Data Models
 
-### 4.1 Architecture Layers Schema
+### 4.1 Architecture Layers (project-specific YAML)
 ```yaml
-# YAML schema for architecture-layers.yml
-type: object
-properties:
-  layers:
-    type: array
-    items:
-      type: object
-      properties:
-        name: { type: string }
-        description: { type: string }
-        allowed_imports: { type: array, items: { type: string } }
-  cross_cutting:
-    type: array
-    items:
-      type: object
-      properties:
-        name: { type: string }
-        description: { type: string }
-        accessible_from: { type: array, items: { type: string } }
+layers:
+  - name: types
+    allowed_imports: []
+  - name: config
+    allowed_imports: [types]
+  - name: domain            # Per ADR-0007
+    allowed_imports: [types, config]
+  - name: command            # Per ADR-0007
+    allowed_imports: [types, config, domain]
+cross_cutting:
+  - name: providers
+    accessible_from: [domain, command]
 ```
 
-### 4.2 Golden Principles Schema
+### 4.2 Golden Principles (profile-level YAML)
 ```yaml
-# YAML schema for golden-principles.yml
-type: object
-properties:
-  principles:
-    type: array
-    items:
-      type: object
-      properties:
-        name: { type: string }
-        description: { type: string }
-        detection: { type: string }
-        remediation: { type: string }
+principles:
+  - name: string
+    description: string
+    detection: string
+    remediation: string
 ```
 
-### 4.3 Trust Tier Schema
+### 4.3 Autonomy Config (in botminter.yml)
 ```yaml
-# In ralph.yml
-projects:
-  <project-name>:
-    autonomy:
-      type: string
-      enum: [supervised, guided, autonomous]
-      default: supervised
+autonomy:
+  default: supervised | guided | autonomous
+  tiers:
+    <tier-name>:
+      description: string
+      human_gates: [status-name, ...]
+      auto_advance_after: string  # optional
+      notification: boolean       # optional
 ```
 
 ### 4.4 Transition Log Entry
 ```json
 {
-  "issue": "integer — issue number",
-  "type": "string — Epic|Task|Bug",
-  "from": "string — previous status",
-  "to": "string — new status",
-  "ts": "string — ISO 8601 UTC timestamp",
-  "hat": "string — hat that performed the transition"
+  "issue": "integer",
+  "type": "Epic | Task | Bug",
+  "from": "string (status)",
+  "to": "string (status)",
+  "ts": "ISO 8601 UTC",
+  "hat": "string (hat name)"
 }
 ```
 
@@ -807,112 +615,124 @@ projects:
 
 ## 5. Error Handling
 
-### 5.1 Mechanical Enforcement Failures
-- If a check script crashes (not just fails), the `dev_code_reviewer` hat reports the error and continues with remaining checks
-- A crashed check does not block review — it's logged as a warning
-- After 3 consecutive crashes, the check is flagged for human attention
+### 5.1 Check Script Failures
+- Script crashes (not fails) → logged as warning, review continues with remaining checks
+- 3 consecutive crashes → check flagged for human attention
+- A crashed check does not block review
 
 ### 5.2 Observability Stack Failures
-- If the observability stack fails to start, the agent proceeds without it (degraded mode)
-- A warning comment is posted on the issue
-- Investigation and fix proceed without telemetry (current behavior)
+- Stack fails to start → agent proceeds without it (degraded mode)
+- Warning comment posted on issue
 
-### 5.3 Auto-Advance Failures
-- If an auto-advance in `guided`/`autonomous` mode fails (e.g., status transition error), fall back to supervised behavior
-- Post a comment explaining the fallback
-- Retry on next scan cycle
+### 5.3 Auto-Advance Failures (Graduated Autonomy)
+- Status transition error during auto-advance → fall back to supervised behavior
+- Post comment explaining the fallback, retry on next scan cycle
 
 ### 5.4 Gardener Hat Failures
-- If the gardener scan fails, it posts a failure comment and retries on the next cycle
-- Does not block any other work
-- Maximum 3 retries before flagging for human attention
+- Scan failure → retry on next cycle, max 3 retries before flagging
+- Does not block other work
 
 ---
 
 ## 6. Impact on Existing System
 
-### 6.1 Modified Components
+### 6.1 BotMinter Codebase Changes
 
 | Component | Change | Risk |
 |-----------|--------|------|
-| `ralph.yml` | Add `autonomy` field per project | Low — new field, backward compatible (defaults to `supervised`) |
-| `po_reviewer` hat | Check autonomy tier before gating | Medium — core workflow change |
-| `dev_code_reviewer` hat | Run executable invariant checks | Low — additive capability |
-| `qe_verifier` hat | Run invariant checks as part of verification | Low — additive |
-| `arch_planner` hat | Write execution plans to files | Low — additive |
-| `arch_monitor` hat | Update plan files, move to completed | Low — additive |
-| Board scanner skill | Log transitions to JSONL | Low — additive |
+| `profiles/scrum-compact/invariants/` | Add `checks/` dir and golden-principles.yml | Low — additive |
+| `profiles/scrum-compact/botminter.yml` | Add `autonomy` field | Low — new field, defaults to `supervised` |
+| `profiles/scrum-compact/roles/superman/ralph.yml` | Add `arch_gardener` hat, update reviewer hat instructions | Medium — hat changes |
+| `crates/bm/src/profile/manifest.rs` | Parse `autonomy` field | Low — new optional field |
+| `crates/bm/src/profile/extraction.rs` | Extract new directories (`plans/`, `metrics/`, `checks/`) | Low — additive extraction |
+| Board scanner skill | Add transition JSONL logging | Low — additive |
 
 ### 6.2 New Components
 
-| Component | Type | Purpose |
-|-----------|------|---------|
-| `arch_gardener` hat | Hat | Periodic codebase cleanup and quality assessment |
-| `architecture-layers.yml` | Config | Machine-readable layer definitions |
-| `golden-principles.yml` | Config | Mechanical consistency rules |
-| `checks/` scripts | Executable | Invariant check scripts |
-| `plans/` directory | Knowledge | Execution plans and tech debt tracker |
-| `metrics/` directory | Data | Transition logs and weekly reports |
-| `QUALITY_SCORE.md` | Knowledge | Per-domain quality grading |
+| Component | Ships In | Purpose |
+|-----------|----------|---------|
+| `checks/` directory template | Profile | Executable invariant checks |
+| `golden-principles.yml` | Profile | Mechanical consistency rules |
+| `arch_gardener` hat | Profile (role ralph.yml) | Periodic cleanup and quality scoring |
+| `plans/` directory template | Profile | Execution plan tracking |
+| `metrics/` directory template | Profile | Transition logs and reports |
+| `QUALITY_SCORE.md` | Generated by gardener | Per-domain quality grading |
+| `autonomy` config | Profile manifest | Graduated autonomy tiers |
 
 ### 6.3 Backward Compatibility
 
 - All changes are additive or opt-in
 - Default `autonomy: supervised` preserves current behavior
-- Existing invariant markdown files remain as reference documentation
-- No existing hat behavior changes unless the project opts in
+- Existing teams get new directories on next `bm init` / profile re-extraction
+- No behavior changes unless explicitly configured
+- Existing prose invariants remain alongside executable checks
+
+### 6.4 What Does NOT Change
+
+- Ralph Orchestrator (`ralph.yml` schema, `ralph emit`, `ralph plan`)
+- GitHub Projects v2 integration (same statuses, same board structure)
+- Human review gate behavior (unless autonomy tier is changed)
+- Existing knowledge hierarchy and resolution order
+- Existing 11 ADRs (remain in `.planning/adrs/`, referenced not modified)
 
 ---
 
 ## 7. Security Considerations
 
 ### 7.1 Graduated Autonomy
-- `autonomous` mode removes human gates — ensure agent review quality is sufficient before enabling
+- `autonomous` mode removes all human gates — ensure agent review quality before enabling
 - Override mechanism (`Rejected:` comment) provides emergency brake
-- Audit trail preserved via notification comments on every auto-advance
-- Recommendation: start with `guided` on one low-risk project; monitor rejection rates before upgrading
+- Audit trail via notification comments on every auto-advance
+- Recommendation: validate `guided` on low-risk work before upgrading to `autonomous`
+- Autonomy setting requires profile re-sync to change — cannot be modified by agents at runtime
 
-### 7.2 Mechanical Enforcement
-- Check scripts execute in CI/agent context — must not introduce command injection
-- Scripts should be read-only (analyze, not modify) during the check phase
-- Only the gardener hat's cleanup PRs should modify code
+### 7.2 Executable Invariant Checks
+- Check scripts execute in agent context — must not introduce command injection
+- Scripts are read-only (analyze, not modify) during the check phase
+- Only gardener hat cleanup PRs modify code
+- Check scripts are version-controlled in the profile/team repo
+- Per ADR-0002's pattern: scripts are declarative with YAML manifests, not arbitrary executables
 
 ### 7.3 Metrics Data
-- Transition logs contain issue numbers and status names, not sensitive data
-- Stored in `team/` repo, same access control as other team artifacts
+- Transition logs contain issue numbers and status names only — no sensitive data
+- Stored in `team/` repo with same access control as other team artifacts
 
-### 7.4 Observability Stack
-- Per-worktree stacks are ephemeral — torn down after task completes
-- No production data enters the local stack — only test/dev data
-- Stack runs locally, not exposed to network
+### 7.4 Observability Stack (Phase C, deferred)
+- Per-worktree, ephemeral, torn down after task
+- No production data — only test/dev data
+- Local only, not network-exposed
 
 ---
 
 ## 8. Implementation Phases
 
-| Phase | Scope | Stories (est.) | Risk | Impact |
-|---|---|---|---|---|
-| 1 | Mechanical Enforcement | 3-4 | Low | High |
-| 2 | Plans + Knowledge Structure | 2-3 | Low | Medium |
-| 3 | Garbage Collection | 3-4 | Low | High |
-| 4 | Metrics | 2-3 | Low | Medium |
-| 5 | Graduated Autonomy | 2-3 | Medium | High |
-| 6 | Application Legibility | 4-6 | Medium-High | High |
+| Phase | Scope | BotMinter Changes | Risk | Impact |
+|-------|-------|-------------------|------|--------|
+| 1 | Executable Invariant Checks | Profile `checks/` dir, hat instruction updates | Low | High |
+| 2 | Plans + Artifact Organization | Profile `plans/` dir template, hat instructions | Low | Medium |
+| 3 | Garbage Collection | `arch_gardener` hat, golden principles, quality score | Low | High |
+| 4 | Metrics Infrastructure | Profile `metrics/` dir, board scanner JSONL | Low | Medium |
+| 5 | Graduated Autonomy | `botminter.yml` schema, `manifest.rs`, hat logic | Medium | High |
+| 6 | Application Legibility (Phases A-D) | Test output invariant, dev-boot, observability | Medium-High | High |
 
-**Recommended order:** 1 → 2 → 3 → 4 → 5 → 6 (enforcement first, autonomy after quality infrastructure is in place)
+**Order:** 1 → 2 → 3 → 4 → 5 → 6
+
+Enforcement and artifact structure first (low risk, immediate value). Autonomy only after quality infrastructure is proven. Observability last (highest complexity, requires per-project setup).
+
+Each phase produces an ADR (following ADR-0001 format) documenting the decisions made during implementation.
 
 ---
 
 ## 9. Success Criteria
 
 | Metric | Current | Target |
-|---|---|---|
+|--------|---------|--------|
+| Invariant violations reaching code review | Untracked | Zero (caught by checks) |
 | Human gate wait time | Unknown | < 4 hours median |
 | Rejection rate at code review | Unknown | < 15% |
-| Invariant violations reaching review | Some (untracked) | Zero |
 | Stale knowledge docs | Unknown | Detected within 1 week |
-| Autonomy tier | `supervised` only | `guided` on >= 1 project |
-| Cycle time trend | Untracked | Measured and improving |
+| Autonomy tier | `supervised` only | `guided` on this project |
+| Cycle time trend | Untracked | Measured and trending down |
 | First-pass success rate | Unknown | > 70% |
 
 ---
@@ -920,7 +740,9 @@ projects:
 ## 10. References
 
 - [OpenAI Harness Engineering (Feb 2026)](https://openai.com/index/harness-engineering/)
-- [Agentic SDLC Blueprint — BayTech Consulting](https://www.baytechconsulting.com/blog/agentic-sdlc-ai-software-blueprint)
-- [How Agentic AI Reshapes Engineering Workflows — CIO](https://www.cio.com/article/4134741/how-agentic-ai-will-reshape-engineering-workflows-in-2026.html)
+- BotMinter ADR-0001: ADR Format (`.planning/adrs/0001-adr-process.md`)
+- BotMinter ADR-0002: Shell Script Bridge pattern (`.planning/adrs/0002-bridge-abstraction.md`)
+- BotMinter ADR-0007: Domain Modules and Command Layering (`.planning/adrs/0007-domain-command-layering.md`)
+- BotMinter ADR-0008: Formation as Deployment Strategy (`.planning/adrs/0008-team-runtime-architecture.md`)
 - BotMinter PROCESS.md — current status graph and workflow conventions
-- BotMinter team/invariants/ — current invariant definitions
+- BotMinter `profiles/scrum-compact/botminter.yml` — profile manifest schema
