@@ -3,7 +3,7 @@
 **Epic:** #106
 **Author:** bob (superman)
 **Date:** 2026-04-03
-**Status:** Draft
+**Status:** Draft (Revision 2 — addressing PR #107 feedback)
 **Reference:** [OpenAI Harness Engineering (Feb 2026)](https://openai.com/index/harness-engineering/)
 
 ---
@@ -16,29 +16,121 @@ OpenAI's Harness team shipped ~1M lines of production code in 5 months with **ze
 
 > *"When something failed, the fix was almost never 'try harder.' Human engineers always asked: 'what capability is missing, and how do we make it legible and enforceable for the agent?'"*
 
-BotMinter already has strong structural alignment (~60%) with validated Harness patterns. This epic closes the remaining 6 gaps through a phased approach.
+BotMinter has structural alignment with several Harness patterns (~65% defined, ~45% operationally realized). However, BotMinter itself was not built using its current agentic SDLC from day one — it evolved through multiple development methodology phases. An honest assessment of this history is essential for identifying the real gaps and designing the right transition.
 
 ---
 
 ## 2. Architecture: Current State vs Target State
 
-### 2.1 What We Already Have (Validated by Harness)
+### 2.1 BotMinter Development History
 
-| Harness Pattern | BotMinter Equivalent | How It Maps |
-|---|---|---|
-| Agent specialization (code, review, test, deploy) | 18 hats (PO, arch, dev, QE, SRE, CW, lead) | Harness uses Codex agents with different roles; BotMinter uses hat-switching on a single superman agent. Same separation of concerns. |
-| Agent-to-agent review ("pushed almost all review to agent-to-agent") | `lead_reviewer` → `dev_code_reviewer` → `qe_verifier` chain | Harness's agent review loop matches our multi-hat review pipeline. |
-| AGENTS.md as table of contents (~100 lines, pointers to deeper docs) | CLAUDE.md as entry point → `team/knowledge/`, invariants, hat knowledge | Both use a small entry file that points to structured deeper knowledge. |
-| Structured docs/ as system of record | `team/knowledge/`, `team/projects/<project>/knowledge/`, hat-level knowledge | Harness: `docs/{design-docs,exec-plans,product-specs,references}`. BotMinter: `team/knowledge/` with project/member/hat scoping. Same progressive disclosure pattern. |
-| Architectural constraints enforced via rules | `team/invariants/`, project invariants, member invariants | Both define rules. Difference: Harness enforces mechanically; BotMinter enforces via prose. |
-| Plans as first-class artifacts (exec-plans with progress logs) | Design docs in `team/projects/<project>/knowledge/designs/` | Harness versions active/completed plans with decision logs. BotMinter stores designs but not execution plans. |
-| Feedback loops (review → reject → revise → re-review) | Rejection loops at every gate with comment-based feedback | Both iterate via structured feedback. |
-| Declarative workflow (status-driven dispatch) | Board scanner + status graph + hat dispatch | Both use a status-driven orchestrator that dispatches work based on current state. |
-| "Ralph Wiggum Loop" (agent reviews own work, iterates until all reviewers satisfied) | Self-review chain: `dev_implementer` → `dev_code_reviewer` → `qe_verifier` | Same pattern: agent writes, agent reviews, agent iterates. |
-| "Boring" technology preference (composable, stable APIs) | Project invariants guide technology choices | Both favor technologies agents can model well. |
-| Repository as single source of truth ("if it isn't in the repo, it doesn't exist") | `team/` repo as control plane + project repos for code | Both reject external context (Slack, docs, heads) in favor of versioned artifacts. |
+BotMinter was NOT built using its own agentic SDLC from day one. Understanding how the product evolved through different methodology phases is critical for an honest gap analysis — each phase contributed different capabilities with different maturity levels.
 
-### 2.2 The Six Gaps
+#### Phase 1: Traditional Development (v0.01–v0.05, Feb 2026)
+
+The foundational CLI and workspace model were built through conventional human-directed development. Ralph Orchestrator served as the execution engine, but there was no formal AI planning framework — the agent was directed interactively or via ad-hoc prompts.
+
+**What was built:**
+- Core `bm` CLI (`init`, `hire`, `fire`, `sync`, `start`, `stop`, `status`, `chat`)
+- Profile system with embedded compile-time profiles
+- Workspace model (team repo + project submodules + file surfacing)
+- GitHub coordination (issues, milestones, labels, Projects v2 bootstrapping)
+- Two-layer runtime model (inner Ralph loop + outer team repo control plane)
+- E2E test harness with `libtest-mimic`
+
+**Development method:** Human-driven with Ralph as execution engine. No formal planning artifacts on disk. The retrospective confirms: *"Phases 2-4 had no GSD plans on disk: These phases were implemented before GSD was initialized"* (`.planning/RETROSPECTIVE.md`).
+
+**Maturity:** High — 471 tests (327 unit + 49 cli_parsing + 95 integration) by the end of this phase. Core CLI commands battle-tested through real operational use.
+
+#### Phase 2: GSD Framework (v0.06–v0.07, Mar 2026)
+
+[GSD (Get Shit Done)](https://github.com/gsd-build/get-shit-done) introduced the first structured AI planning methodology: milestone decomposition into phases and plans (`PLAN.md` files with YAML frontmatter), a five-step CLI-agent handshake, verification loops with `must_haves` contracts, and parallel worktree execution.
+
+**What was built:**
+- Coding-agent-agnostic architecture with inline agent tags
+- Composable skills system (board-scanner, status-workflow, github-project)
+- `bm chat` and `bm minty` interactive assistant with 4 skills
+- Bridge abstraction (Telegram, Rocket.Chat, Tuwunel/Matrix)
+- Profile integration for bridges, credential store with keyring backend
+- 399 files changed, 34k insertions across v0.06 alone
+
+**Development method:** Agent-driven with GSD-structured planning. Each phase had formal `PLAN.md` files, verification checks, and UAT gap closure. *"First milestone using GSD workflow; UAT gap closure pattern established"* (`.planning/RETROSPECTIVE.md`).
+
+**Maturity:** Medium-High — 576 tests by end of v0.07. Bridge lifecycle validated via e2e and exploratory tests on an isolated test user account.
+
+#### Phase 3: Agent SOP / Ralph Hat System (concurrent with late GSD, evolving)
+
+Ralph's hat definitions were progressively formalized as structured standard operating procedures. The Ralph system prompt defines a strict ORIENTATION - STATE MANAGEMENT - PLAN - DELEGATE - HATS - DONE cycle. Each hat's `instructions` block in `ralph.yml` functions as a codified SOP for that role — the "Agent SOP" phase is when these informal practices were encoded into machine-readable hat instructions.
+
+**What was built:**
+- Board scanner procedure (auto-injected skill, not a hat)
+- 18 hat definitions with structured instructions in `ralph.yml`
+- Event-driven dispatch via `ralph emit` and hat chaining
+- Status graph with 32 statuses and defined transitions
+- Evidence gates and backpressure quality enforcement
+- Human review gates (po:design-review, po:plan-review, po:accept)
+
+**Development method:** Iterative formalization — human and agent collaboration encoding process knowledge into hat instructions and event topology. Not built by the hats themselves, but by humans and agents encoding operational procedures into the team repo.
+
+**Maturity:** Medium — the hat system is functional and has been running for weeks, but some hats have been exercised significantly more than others.
+
+#### Phase 4: A-Team / Dogfooding (Late Mar 2026–present)
+
+The current `devguyio-agentic` team IS the "A-Team" — a team created using BotMinter's own `bm init` workflow, running the `scrum-compact` profile, with `superman-bob` wearing all 18 hats to develop BotMinter itself. This is the self-bootstrapping/dogfooding phase.
+
+**What it validates:**
+- Full issue lifecycle (triage - design - plan - breakdown - implement - review - verify - done)
+- Hat switching within a single superman agent
+- Human gates via GitHub comments (supervised mode)
+- Board-driven dispatch and auto-advance transitions
+- Knowledge resolution across 5 scoping levels
+
+**Development method:** BotMinter developing BotMinter. The team repo tracks issues on GitHub Projects v2; superman-bob processes them through the hat-based SDLC.
+
+**Maturity:** Early — the A-Team has been running for approximately one week. Design and triage workflows have been exercised; the full story implementation cycle (TDD - implement - code review - verify) has not yet been validated end-to-end.
+
+### 2.2 Current Capabilities Inventory
+
+The following table maps each capability to its origin phase and assessed maturity level:
+
+| Capability | Origin Phase | Maturity | Notes |
+|---|---|---|---|
+| Core CLI (`init`, `hire`, `sync`, `start`, `stop`) | Traditional (v0.01-v0.05) | High | Battle-tested, 576+ tests |
+| Profile system (embedded, compile-time) | Traditional (v0.01-v0.05) | High | 2 profiles (scrum, scrum-compact) |
+| Workspace model (team repo + project submodules) | Traditional (v0.01-v0.05) | High | Proven in production use |
+| GitHub coordination (issues, milestones, Projects v2) | Traditional (v0.01-v0.05) | High | Operational since Feb 2026 |
+| Coding-agent-agnostic architecture | GSD (v0.06) | High | Agent tags, filtered extraction |
+| Skills system (composable, two-level scoping) | GSD (v0.06) | Medium-High | 10+ skills in active use |
+| Bridge abstraction (Telegram, RC, Matrix) | GSD (v0.07) | Medium-High | E2E + exploratory tested |
+| Interactive assistant (`bm chat`, `bm minty`) | GSD (v0.06) | Medium | 4 Minty skills |
+| Board scanner + status-driven dispatch | SOP/Hats (evolving) | Medium | Functional, exercised across multiple scan cycles |
+| 18 hat definitions (PO, arch, dev, QE, SRE, CW, lead) | SOP/Hats (evolving) | Medium | Some hats (po_backlog, arch_designer) more exercised than others (sre_setup, cw_writer) |
+| Knowledge hierarchy (5 scoping levels) | SOP/Hats (evolving) | Medium | Structure proven, content depth varies by area |
+| Invariant system (team, project, member levels) | SOP/Hats (evolving) | Low-Medium | Prose-only, no mechanical enforcement |
+| Rejection loops at review gates | A-Team (dogfooding) | Low-Medium | Exercised a few times during dogfooding |
+| TDD-first story workflow | A-Team (dogfooding) | Low | Defined in hat instructions but not yet fully validated end-to-end |
+| Bug triage (simple vs complex paths) | A-Team (dogfooding) | Low | Defined but untested end-to-end |
+
+### 2.3 Harness Pattern Alignment (Honest Assessment)
+
+This table maps Harness Engineering patterns to BotMinter equivalents, with an honest maturity assessment distinguishing between what is structurally defined vs. operationally proven.
+
+| Harness Pattern | BotMinter Equivalent | Structural Alignment | Operational Maturity |
+|---|---|---|---|
+| Agent specialization | 18 hats (PO, arch, dev, QE, SRE, CW, lead) | Strong | Medium — defined and functional but most hats have limited operational history |
+| Agent-to-agent review | `lead_reviewer` - `dev_code_reviewer` - `qe_verifier` chain | Strong | Low-Medium — review chain defined, exercised only a handful of times |
+| AGENTS.md as table of contents | CLAUDE.md - `team/knowledge/`, invariants, hat knowledge | Strong | High — knowledge entry point pattern well-established |
+| Structured docs as system of record | `team/knowledge/` with 5-level scoping | Moderate | Medium — structure exists, content depth varies |
+| Architectural constraints via rules | `team/invariants/`, project invariants, member invariants | Weak | Low — invariants are prose markdown, no mechanical enforcement |
+| Plans as first-class artifacts | Design docs in `team/projects/<project>/knowledge/designs/` | Weak | Low — designs exist but no execution plans, progress logs, or tech debt tracking |
+| Feedback loops (review - reject - revise) | Rejection loops at every gate | Moderate | Low-Medium — loops defined, exercised a few times |
+| Declarative workflow (status-driven dispatch) | Board scanner + status graph + hat dispatch | Strong | Medium — operational for weeks, handles auto-advance and human gates |
+| Self-review chain ("Ralph Wiggum Loop") | `dev_implementer` - `dev_code_reviewer` - `qe_verifier` | Strong | Low — defined in hat instructions but full chain not yet validated |
+| Repository as single source of truth | `team/` repo as control plane + project repos for code | Strong | High — proven since project inception |
+
+**Overall alignment: ~45% operationally realized, ~65% structurally defined.** The gap between "structurally defined" and "operationally realized" is the maturity gap — many patterns are encoded in hat instructions and process docs but have limited real-world validation. This maturity gap must be addressed alongside the six architectural gaps below.
+
+### 2.4 The Six Gaps
 
 ```
 Current State                          Target State
@@ -50,6 +142,8 @@ Designs only, no exec plans       -->  Plans as first-class artifacts (active/co
 3 hard human gates                -->  Graduated autonomy (supervised/guided/autonomous)
 No metrics                        -->  Cycle-time + quality tracking + data-driven retros
 ```
+
+**Note:** These gaps are assessed against Harness Engineering's validated patterns. Closing them requires not just building the features but also achieving sufficient operational maturity — each gap has a "build it" component and a "prove it works" component. The phased implementation plan (Section 8) accounts for this by recommending operational stabilization before advancing to higher-risk changes.
 
 ---
 
