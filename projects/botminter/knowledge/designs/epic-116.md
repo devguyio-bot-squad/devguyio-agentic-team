@@ -85,8 +85,10 @@ updated: 2026-04-04
 | Type | Location | Produced by | Consumed by |
 |------|----------|-------------|-------------|
 | Design | `designs/epic-<N>.md` | `arch_designer` | `arch_planner`, `dev_implementer`, `lead_reviewer`, `po_reviewer` |
-| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `arch_breakdown`, `dev_implementer`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
+| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `dev_implementer`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
 | Implementation | `plans/story-<N>-impl.md` | `dev_implementer` | `dev_code_reviewer`, `qe_verifier` |
+
+**Note:** `arch_breakdown` is not a consumer of the breakdown file — it reads the GitHub comment for story creation (see §3.3, §3.5). It writes back to the file to update the `stories` field with created issue numbers.
 
 ### 2.3 Plan Lifecycle
 
@@ -198,7 +200,7 @@ Existing design docs gain YAML frontmatter conforming to the §3.1 schema. The e
 | `parent: "N"` (string) | Retained as `parent: N` (integer) |
 | `type:`, `status:`, `revision:`, `created:`, `updated:` | Retained or added per §3.1 |
 
-Batch migration of all existing docs is not in scope. Migration happens lazily — each doc is rewritten when a hat next produces or revises it. During the transition, hats encountering unrecognized fields ignore them and apply the §3.1 schema on write.
+Batch migration of all existing docs is not in scope. Migration happens lazily — each doc is rewritten when a hat next produces or revises it. During the transition, hats encountering unrecognized fields ignore them and apply the §3.1 schema on write. Design docs committed alongside this specification (e.g., `epic-106.md`) may still use the ad-hoc schema — they will be migrated when a hat next revises them.
 
 Example transformation for `epic-114.md` (no existing frontmatter):
 
@@ -225,7 +227,7 @@ updated: 2026-04-04
 2. Decompose into stories (existing behavior)
 3. **Write breakdown file** to `plans/epic-<N>-breakdown.md` with frontmatter
 4. Post the breakdown as a GitHub comment (existing behavior)
-5. Transition to `lead:plan-review` (existing behavior)
+5. Update breakdown frontmatter to `status: in-review` and transition to `lead:plan-review`
 
 The breakdown file contains the same content as the comment, plus the frontmatter header. The comment provides visibility in the issue timeline. The file provides persistence and machine-readability.
 
