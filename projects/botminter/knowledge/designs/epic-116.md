@@ -11,7 +11,7 @@
 
 BotMinter's SDLC workflow produces three categories of plans: design documents, story breakdowns, and implementation plans. Today these fragment across locations and formats:
 
-- **Design docs** — Files at `team/projects/<project>/knowledge/designs/epic-<N>.md`, but with no structured metadata (no frontmatter, no status tracking, no revision field). The `arch_designer` hat writes plain markdown.
+- **Design docs** — Files at `team/projects/<project>/knowledge/designs/epic-<N>.md`. Four of seven existing docs have ad-hoc YAML frontmatter (fields like `epic:`, `author:`, `sub_epics:`, `depends_on:` with string-typed values), while three have none. There is no consistent schema — field names, types, and presence vary across docs. No doc tracks plan lifecycle status.
 - **Story breakdowns** — Posted by `arch_planner` as GitHub issue comments only. No file-system presence. Once posted, they're accessible only via the GitHub API. Agents that need to reference a breakdown must re-parse the comment from the issue timeline.
 - **Implementation plans** — Exist only in the agent's context window during `dev_implementer` execution. Lost entirely on context refresh. No downstream hat can inspect what approach the implementer intended.
 
@@ -183,9 +183,24 @@ Fields by plan type:
 
 ### 3.2 Design Doc Enhancement
 
-Existing design docs (e.g., `epic-114.md`) gain YAML frontmatter. The existing content remains unchanged. This is backward-compatible — files without frontmatter still work; hats treat missing frontmatter as `status: draft, revision: 1`.
+Existing design docs gain YAML frontmatter conforming to the §3.1 schema. The existing content remains unchanged.
 
-Example transformation for the existing `epic-114.md`:
+**Docs without frontmatter** (e.g., `epic-114.md`, `epic-117.md`): The first hat that touches the doc adds the full §3.1 frontmatter block. Until then, hats treat missing frontmatter as `status: draft, revision: 1`.
+
+**Docs with ad-hoc frontmatter** (e.g., `epic-106.md`, `epic-118.md`, `epic-119.md`, `epic-120.md`): These use a divergent schema — `epic:` (string), `author:`, `sub_epics:`, `depends_on:` (on designs), with string-typed values. The first hat that touches each doc rewrites the frontmatter to conform to the §3.1 schema:
+
+| Ad-hoc field | Disposition |
+|-------------|-------------|
+| `epic: "N"` | Dropped — redundant with the filename (`epic-<N>.md`) |
+| `author:` | Dropped — captured by `git blame` |
+| `sub_epics:` | Dropped — the breakdown file's `stories` field replaces this |
+| `depends_on:` (on designs) | Dropped — only applicable to implementation plans per §3.1 |
+| `parent: "N"` (string) | Retained as `parent: N` (integer) |
+| `type:`, `status:`, `revision:`, `created:`, `updated:` | Retained or added per §3.1 |
+
+Batch migration of all existing docs is not in scope. Migration happens lazily — each doc is rewritten when a hat next produces or revises it. During the transition, hats encountering unrecognized fields ignore them and apply the §3.1 schema on write.
+
+Example transformation for `epic-114.md` (no existing frontmatter):
 
 ```markdown
 ---
@@ -384,6 +399,14 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 - **Given** `arch_planner` transitions a breakdown to `lead:plan-review`, **when** the transition occurs, **then** the breakdown file's frontmatter is updated to `status: in-review`.
 
 - **Given** `dev_implementer` starts working on a story, **when** the implementer reads the parent breakdown, **then** the breakdown file's frontmatter is updated to `status: in-progress`.
+
+- **Given** `arch_designer` transitions a design to `lead:design-review`, **when** the transition occurs, **then** the design doc's frontmatter is updated to `status: in-review` and the `updated` date reflects the transition date.
+
+- **Given** `dev_implementer` writes an implementation plan, **when** the plan file is created, **then** it contains valid YAML frontmatter with `type: implementation`, `status: in-progress`, the parent story number, and `revision: 1`.
+
+- **Given** `qe_test_designer` designs tests for a story, **when** the parent epic has a breakdown file at `plans/epic-<N>-breakdown.md`, **then** the test designer reads the breakdown file for test scope and inter-story dependency context. **When** no breakdown file exists, **then** the test designer proceeds using story issue content alone and logs a warning.
+
+- **Given** `qe_verifier` verifies a completed story, **when** an implementation plan exists at `plans/story-<N>-impl.md`, **then** the verifier reads the plan for verification context (intended approach, affected files, test strategy). **When** no implementation plan exists, **then** the verifier proceeds using story acceptance criteria alone and logs a warning.
 
 - **Given** a plan file has malformed or missing frontmatter, **when** a hat reads it, **then** the hat treats it as `status: draft, revision: 1` and proceeds without error.
 
