@@ -36,7 +36,6 @@ This mirrors the Harness principle of structured logging vs `println!` — make 
 - Design doc frontmatter enhancement (backward-compatible)
 - Breakdown artifact files alongside GitHub comments
 - Implementation plan artifacts before coding starts
-- Plan registry (index file)
 - Hat instruction updates (7 hats: `arch_designer`, `arch_planner`, `arch_breakdown`, `dev_implementer`, `dev_code_reviewer`, `qe_test_designer`, `qe_verifier`)
 - Profile-level convention documentation
 
@@ -85,8 +84,8 @@ updated: 2026-04-04
 
 | Type | Location | Produced by | Consumed by |
 |------|----------|-------------|-------------|
-| Design | `designs/epic-<N>.md` | `arch_designer` | `arch_planner`, `lead_reviewer`, `po_reviewer` |
-| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `arch_breakdown`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
+| Design | `designs/epic-<N>.md` | `arch_designer` | `arch_planner`, `dev_implementer`, `lead_reviewer`, `po_reviewer` |
+| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `arch_breakdown`, `dev_implementer`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
 | Implementation | `plans/story-<N>-impl.md` | `dev_implementer` | `dev_code_reviewer`, `qe_verifier` |
 
 ### 2.3 Plan Lifecycle
@@ -122,7 +121,9 @@ Plan status maps to the existing SDLC workflow:
                └───────────┘
 ```
 
-Status transitions in plan frontmatter mirror the issue status transitions. The hat that produces the plan sets `draft`. When the plan's review status is reached (e.g., `lead:design-review` for designs), the plan status becomes `in-review`. On approval, `approved`. When the next phase starts consuming the plan, `in-progress`. When all downstream work is done, `complete`.
+Status transitions in plan frontmatter mirror the issue status transitions. The hat that produces a design or breakdown sets `draft`. When the plan's review status is reached (e.g., `lead:design-review` for designs), the plan status becomes `in-review`. On approval, `approved`. When the next phase starts consuming the plan, `in-progress`. When all downstream work is done, `complete`.
+
+Implementation plans are an exception — they enter the lifecycle at `in-progress` because they are unreviewed working documents produced by `dev_implementer` immediately before coding, not gated artifacts that pass through review. They skip `draft`, `in-review`, and `approved` entirely.
 
 ### 2.4 Relationship to Existing Planning Artifacts
 
