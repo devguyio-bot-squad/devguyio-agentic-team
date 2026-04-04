@@ -61,7 +61,7 @@ Check scripts operate on the project repo source tree. They analyze static code 
 
 ### 2.2 Check Scope: Project-Specific
 
-All 4 check scripts live in `projects/botminter/invariants/checks/`. They enforce BotMinter-specific ADRs and invariants using Rust-aware patterns (`grep` on `.rs` files, `#[cfg(test)]` awareness, BotMinter-specific paths).
+All 4 check scripts live in `projects/botminter/invariants/checks/`. They enforce BotMinter-specific ADRs and invariants using Rust-aware patterns (`grep` on `.rs` files, BotMinter-specific paths). None of the checks have `#[cfg(test)]` block awareness — grep-based scripts cannot distinguish test code from production code within the same file (see §3.3 Known Limitations).
 
 **Why not profile-generic?** The scrum-compact profile is a process profile, not a language profile. All 4 initial checks are Rust-specific (grep `.rs` files, reference `crates/bm/src/`, check for `dirs::home_dir()`). Placing them in `team/invariants/checks/` would claim language-agnostic applicability they don't have. Profile-generic checks are appropriate when genuinely language-agnostic checks exist (e.g., "no files over N lines regardless of extension", "no secrets in committed files"). That boundary is deferred until such a check is needed.
 
@@ -122,9 +122,9 @@ All scripts live in `projects/botminter/invariants/checks/`:
 | Script | Invariant | What It Checks |
 |---|---|---|
 | `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 total lines (soft threshold per ADR-0007's "~300" qualifier). Counts all lines — no `#[cfg(test)]` block exclusion, since `wc -l` cannot distinguish test code from production code and ADR-0007 states the ~300 limit without a test-exclusion caveat. Excludes `target/`, test fixtures. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
-| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/tests/` **only**. Flags any usage in test code — test files should use `tempdir()` or equivalent isolation, never the real home directory. Production code (`crates/bm/src/`) is **excluded**: `dirs::home_dir()` is used legitimately there (e.g., `config/mod.rs` for config resolution, `formation/lima.rs` for VM paths). The check does not attempt semantic tempdir-pairing analysis — it simply reports `home_dir` calls in test files as violations. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. |
-| `domain-layer-imports.sh` | ADR-0007 | Greps for `println!`, `eprintln!`, `use clap`, `use comfy_table`, `use dialoguer`, `use cliclack` in all dirs under `crates/bm/src/` except the command layer (`commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`). Uses directory exclusion — new domain modules are scanned automatically. |
-| `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` (partial) | Known profile name strings (`"scrum-compact"`, `"scrum"`) in `.rs` files. Excludes `tests/`, `test-fixtures/`, `profiles/`. **Caveat:** This check enforces the profile-name subset of the `no-hardcoded-profiles` invariant. The full invariant also prohibits hardcoded role names, status values, label names, and other profile-derived data — those remain enforced by agent judgment during code review, as they require semantic understanding of what constitutes "profile-derived data." |
+| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/tests/` **only**. Flags any usage in test code — test files should use `tempdir()` or equivalent isolation, never the real home directory. Production code (`crates/bm/src/`) is **excluded**: `dirs::home_dir()` is used legitimately there (e.g., `config/mod.rs` for config resolution, `formation/lima.rs` for VM paths). The check does not attempt semantic tempdir-pairing analysis — it simply reports `home_dir` calls in test files as violations. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. **Known invariant gap:** The `test-path-isolation` invariant also covers `#[cfg(test)]` modules in `crates/bm/src/` (unit tests), but this check does not scan `src/` — doing so would require distinguishing `#[cfg(test)]` blocks from production code, which grep cannot do. All `home_dir` calls in `src/` are legitimate production code (config/mod.rs:95,179,188; formation/lima.rs:286,462; commands/debug.rs:268). Currently 0 violations exist in this gap. |
+| `domain-layer-imports.sh` | ADR-0007 | Greps for `println!`, `eprintln!`, `use clap`, `use comfy_table`, `use dialoguer`, `use cliclack` in all modules under `crates/bm/src/` except the command layer (`commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`). Scans both directory modules (`$DOMAIN_ROOT/*/`) and standalone domain `.rs` files (`$DOMAIN_ROOT/*.rs`, excluding command-layer files). New domain modules — whether directories or standalone files — are scanned automatically. |
+| `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` (partial) | Scans for known profile name strings (`"scrum-compact"`, `"scrum"`) in `.rs` files under `crates/bm/src/`. Excludes `commands/`, `tests/`, `test-fixtures/`, `profiles/`. **Baseline:** 65 existing occurrences — all in `#[cfg(test)]` blocks (config/mod.rs:7, profile/agent.rs:9, profile/extraction.rs:10, profile/mod.rs:11, web/files.rs:15, web/teams.rs:4, web/members.rs:3, formation/init.rs:1, git/manifest_flow.rs:3, team.rs:1, profile/member.rs:1). These are test fixtures that hardcode profile names, violating the invariant's intent. **`#[cfg(test)]` exclusion policy:** grep cannot distinguish `#[cfg(test)]` blocks from production code, so all 65 will be reported as violations on first run. Like `domain-layer-imports.sh`, the `// check:ignore` suppression mechanism applies, but the right fix is to make these tests use dynamic profile discovery per the invariant. **Caveat:** This check enforces the profile-name subset of the `no-hardcoded-profiles` invariant. The full invariant also prohibits hardcoded role names, status values, label names, and other profile-derived data — those remain enforced by agent judgment during code review, as they require semantic understanding of what constitutes "profile-derived data." |
 
 ### 3.3 Custom Linter Implementation Details
 
@@ -143,6 +143,7 @@ DOMAIN_ROOT="crates/bm/src"
 
 violations=0
 
+# Pass 1: Directory modules
 for dir in "$DOMAIN_ROOT"/*/; do
     dirname=$(basename "$dir")
     [[ "$dirname" == "commands" ]] && continue
@@ -154,6 +155,27 @@ for dir in "$DOMAIN_ROOT"/*/; do
             line=$(echo "$match" | cut -d: -f2)
             content=$(echo "$match" | cut -d: -f3-)
             echo "VIOLATION: Domain module $file uses prohibited import/call (line $line): $content"
+            echo "RULE: ADR-0007 domain-command layering"
+            echo "REMEDIATION: Move presentation to command layer. Use tracing macros for diagnostics."
+            echo "REFERENCE: .planning/adrs/0007-domain-command-layering.md"
+            echo ""
+            violations=$((violations + 1))
+        done <<< "$matches"
+    fi
+done
+
+# Pass 2: Standalone domain .rs files (excluding command-layer files)
+for file in "$DOMAIN_ROOT"/*.rs; do
+    [[ ! -f "$file" ]] && continue
+    fname=$(basename "$file")
+    [[ "$fname" =~ ^(main|cli|agent_main|agent_cli)\.rs$ ]] && continue
+
+    matches=$(grep -n -E "$PATTERNS" "$file" 2>/dev/null)
+    if [[ -n "$matches" ]]; then
+        while IFS= read -r match; do
+            line=$(echo "$match" | cut -d: -f1)
+            content=$(echo "$match" | cut -d: -f2-)
+            echo "VIOLATION: Domain file $file uses prohibited import/call (line $line): $content"
             echo "RULE: ADR-0007 domain-command layering"
             echo "REMEDIATION: Move presentation to command layer. Use tracing macros for diagnostics."
             echo "REFERENCE: .planning/adrs/0007-domain-command-layering.md"
@@ -183,6 +205,24 @@ exit $((violations > 0 ? 1 : 0))
 | profile | `profile/agent.rs` | 151, 159 | Status messages during Minty config init |
 
 Per ADR-0007: replace with `tracing::warn!`/`tracing::info!` or return structured `Result` types to the command layer. Fixing these is the first concrete deliverable after checks are in place.
+
+`no-hardcoded-profiles.sh` will flag 65 existing violations (all in `#[cfg(test)]` blocks):
+
+| Module | File | Count | What |
+|---|---|---|---|
+| config | `config/mod.rs` | 7 | Test fixtures with `profile: "scrum"` |
+| profile | `profile/agent.rs` | 9 | Test calls to `scan_agent_tags_in("scrum", ...)` |
+| profile | `profile/extraction.rs` | 10 | Test fixtures with profile name strings |
+| profile | `profile/mod.rs` | 11 | Test calls to `read_manifest_from("scrum", ...)` |
+| profile | `profile/member.rs` | 1 | Test fixture with profile name |
+| web | `web/files.rs` | 15 | Test fixtures with profile name strings |
+| web | `web/teams.rs` | 4 | Test fixtures with profile name strings |
+| web | `web/members.rs` | 3 | Test fixtures with profile name strings |
+| formation | `formation/init.rs` | 1 | Test fixture with `profile: "scrum"` |
+| git | `git/manifest_flow.rs` | 3 | Test fixtures with `profile: "scrum"` |
+| (standalone) | `team.rs` | 1 | Test fixture with profile name |
+
+Per the `no-hardcoded-profiles` invariant: tests should use dynamic profile discovery (`list_profiles`, `read_manifest`) instead of hardcoded profile name strings. Fixing these is lower priority than the ADR-0007 `eprintln!` violations.
 
 ### 3.5 Hat Integration
 
