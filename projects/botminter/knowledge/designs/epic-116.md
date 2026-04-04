@@ -17,7 +17,7 @@ BotMinter's SDLC workflow produces three categories of plans: design documents, 
 
 There is no plan registry. Plans are discovered by path convention (`designs/epic-<N>.md`), not by structured index. Story breakdowns and implementation plans have no file presence at all.
 
-This sub-epic introduces a plan artifact convention: structured, git-tracked files with YAML frontmatter, consistent locations, and integration into 6 hats. Agent-produced plans become inspectable, auditable, and consumable across iterations and hat transitions.
+This sub-epic introduces a plan artifact convention: structured, git-tracked files with YAML frontmatter, consistent locations, and integration into 7 hats. Agent-produced plans become inspectable, auditable, and consumable across iterations and hat transitions.
 
 ### Harness Pattern
 
@@ -37,7 +37,7 @@ This mirrors the Harness principle of structured logging vs `println!` — make 
 - Breakdown artifact files alongside GitHub comments
 - Implementation plan artifacts before coding starts
 - Plan registry (index file)
-- Hat instruction updates (6 hats: `arch_designer`, `arch_planner`, `dev_implementer`, `dev_code_reviewer`, `qe_test_designer`, `qe_verifier`)
+- Hat instruction updates (7 hats: `arch_designer`, `arch_planner`, `arch_breakdown`, `dev_implementer`, `dev_code_reviewer`, `qe_test_designer`, `qe_verifier`)
 - Profile-level convention documentation
 
 ### Out of Scope
@@ -70,7 +70,7 @@ All plan artifacts share a common format:
 ---
 type: design | breakdown | implementation
 status: draft | in-review | approved | in-progress | complete
-parent: 106          # parent epic/story issue number
+parent: 114          # issue number this plan belongs to
 revision: 1
 created: 2026-04-04
 updated: 2026-04-04
@@ -195,7 +195,7 @@ Example transformation for the existing `epic-114.md`:
 ---
 type: design
 status: in-review
-parent: 106
+parent: 114
 revision: 1
 created: 2026-04-04
 updated: 2026-04-04
@@ -286,12 +286,13 @@ The implementation plan gives `dev_code_reviewer` and `qe_verifier` inspectable 
 
 ### 3.5 Hat Instruction Updates
 
-Six hats receive instruction updates:
+Seven hats receive instruction updates:
 
 | Hat | Current Behavior | New Behavior |
 |-----|-----------------|-------------|
 | `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` on creation, `status: in-review` on transition to `lead:design-review`. |
 | `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft`. |
+| `arch_breakdown` | Creates story issues from breakdown comment | Also updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
 | `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress`. |
 | `dev_code_reviewer` | Reviews code without plan context | Reads `plans/story-<N>-impl.md` to validate implementation matches the plan. Checks for plan drift. |
 | `qe_test_designer` | Reads story acceptance criteria from issue | Also reads the parent epic's breakdown file for test scope and inter-story dependency context. |
