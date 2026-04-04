@@ -229,6 +229,8 @@ updated: 2026-04-04
 
 The breakdown file contains the same content as the comment, plus the frontmatter header. The comment provides visibility in the issue timeline. The file provides persistence and machine-readability.
 
+**Revision after rejection:** When a breakdown is rejected at `lead:plan-review` and the planner must revise, the same steps apply with revision semantics. The planner overwrites the existing file (incrementing `revision`, resetting `status` to `draft`, updating `updated` date) and posts a NEW comment to the issue. The latest comment is authoritative for `arch_breakdown` — it always reads the most recent breakdown comment, which will match the latest file revision.
+
 **Breakdown file structure:**
 
 ```markdown
@@ -301,8 +303,8 @@ Seven hats receive instruction updates:
 
 | Hat | Current Behavior | New Behavior |
 |-----|-----------------|-------------|
-| `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` on creation, `status: in-review` on transition to `lead:design-review`. |
-| `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft` on creation, `status: in-review` on transition to `lead:plan-review`. Also updates the parent design's frontmatter to `status: in-progress` when starting breakdown work. |
+| `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:design-review`. |
+| `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:plan-review`. Also updates the parent design's frontmatter to `status: in-progress` when starting breakdown work. |
 | `arch_breakdown` | Creates story issues from breakdown comment | Also updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
 | `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress`. Also updates the parent breakdown's frontmatter to `status: in-progress` when starting story work. |
 | `dev_code_reviewer` | Reviews code without plan context | Reads `plans/story-<N>-impl.md` to validate implementation matches the plan. Checks for plan drift. |
@@ -390,7 +392,9 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 
 - **Given** `dev_code_reviewer` reviews a story, **when** an implementation plan exists, **then** the reviewer reads the plan and checks whether the code changes match the planned approach and affected files.
 
-- **Given** a design doc is revised after rejection feedback, **when** the revised design is written, **then** the frontmatter `revision` field is incremented and `updated` date reflects the revision date.
+- **Given** a design doc is revised after rejection feedback, **when** the revised design is written, **then** the frontmatter `revision` field is incremented, `status` is set to `draft`, and `updated` date reflects the revision date.
+
+- **Given** a breakdown file is revised after rejection feedback at `lead:plan-review`, **when** the revised breakdown is written, **then** the frontmatter `revision` field is incremented, `status` is set to `draft`, `updated` date reflects the revision date, and a new GitHub comment is posted with the revised breakdown content.
 
 - **Given** `arch_breakdown` creates story issues from a breakdown, **when** issues are created, **then** the breakdown file's `stories` field is updated with the created issue numbers.
 
