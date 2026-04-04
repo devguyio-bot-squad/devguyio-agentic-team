@@ -4,6 +4,7 @@
 **Author:** bob (superman)
 **Date:** 2026-04-04
 **Status:** Draft
+**Revision:** 9
 
 ---
 
@@ -85,10 +86,10 @@ updated: 2026-04-04
 | Type | Location | Produced by | Consumed by |
 |------|----------|-------------|-------------|
 | Design | `designs/epic-<N>.md` | `arch_designer` | `arch_planner`, `dev_implementer`, `lead_reviewer`, `po_reviewer` |
-| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `dev_implementer`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
+| Breakdown | `plans/epic-<N>-breakdown.md` | `arch_planner` | `arch_breakdown`, `dev_implementer`, `lead_reviewer`, `po_reviewer`, `qe_test_designer` |
 | Implementation | `plans/story-<N>-impl.md` | `dev_implementer` | `dev_code_reviewer`, `qe_verifier` |
 
-**Note:** `arch_breakdown` is not a consumer of the breakdown file — it reads the GitHub comment for story creation (see §3.3, §3.5). It writes back to the file to update the `stories` field with created issue numbers.
+**Single source of truth:** The breakdown FILE is the authoritative source for all consumers. The GitHub comment posted in step 4 of §3.3 is a visibility mirror — it provides convenience in the issue timeline but is not read by any hat for decision-making. `arch_breakdown` reads the breakdown file (not the comment) for story creation and writes back the `stories` field with created issue numbers.
 
 ### 2.3 Plan Lifecycle
 
@@ -197,7 +198,7 @@ Existing design docs gain YAML frontmatter conforming to the §3.1 schema. The e
 | `author:` | Dropped — captured by `git blame` |
 | `sub_epics:` | Dropped — the breakdown file's `stories` field replaces this |
 | `depends_on:` (on designs) | Dropped — only applicable to implementation plans per §3.1 |
-| `parent: "N"` (string) | Retained as `parent: N` (integer) |
+| `parent: "N"` (string) | Dropped — the ad-hoc `parent` has different semantics (references umbrella epic). Replaced with the design's own issue number derived from filename `epic-<N>.md`. |
 | `type:`, `status:`, `revision:`, `created:`, `updated:` | Retained or added per §3.1 |
 
 Batch migration of all existing docs is not in scope. Migration happens lazily — each doc is rewritten when a hat next produces or revises it. During the transition, hats encountering unrecognized fields ignore them and apply the §3.1 schema on write. Design docs committed alongside this specification (e.g., `epic-106.md`) may still use the ad-hoc schema — they will be migrated when a hat next revises them.
@@ -220,18 +221,18 @@ updated: 2026-04-04
 
 ### 3.3 Breakdown Artifact
 
-`arch_planner` currently posts story breakdowns as GitHub issue comments only. This design adds a parallel file write.
+`arch_planner` currently posts story breakdowns as GitHub issue comments only. This design adds a file write as the authoritative artifact, with a comment mirror for visibility.
 
 **New workflow for `arch_planner`:**
 1. Read the design doc from `designs/epic-<N>.md` and update its frontmatter to `status: in-progress`
 2. Decompose into stories (existing behavior)
-3. **Write breakdown file** to `plans/epic-<N>-breakdown.md` with frontmatter
-4. Post the breakdown as a GitHub comment (existing behavior)
+3. **Write breakdown file** to `plans/epic-<N>-breakdown.md` with frontmatter — this is the authoritative artifact
+4. **Post the breakdown body as a GitHub comment** (visibility mirror — not read by any hat for decision-making)
 5. Update breakdown frontmatter to `status: in-review` and transition to `lead:plan-review`
 
-The breakdown file contains the same content as the comment, plus the frontmatter header. The comment provides visibility in the issue timeline. The file provides persistence and machine-readability.
+**Content-identity guarantee:** Steps 3 and 4 write from the same in-memory content. The planner generates the breakdown body once, writes it to the file (step 3), then posts that same body as the comment (step 4). The file is the authoritative source for all downstream hats including `arch_breakdown`. The comment exists solely for human visibility in the issue timeline.
 
-**Revision after rejection:** When a breakdown is rejected at `lead:plan-review` and the planner must revise, the same steps apply with revision semantics. The planner overwrites the existing file (incrementing `revision`, resetting `status` to `draft`, updating `updated` date) and posts a NEW comment to the issue. The latest comment is authoritative for `arch_breakdown` — it always reads the most recent breakdown comment, which will match the latest file revision.
+**Revision after rejection:** When a breakdown is rejected at `lead:plan-review` and the planner must revise, the same steps apply with revision semantics. The planner overwrites the existing file (incrementing `revision`, resetting `status` to `draft`, updating `updated` date) and posts a NEW comment to the issue with the same body. All consumers (including `arch_breakdown`) read the file, not the comment.
 
 **Breakdown file structure:**
 
@@ -264,7 +265,7 @@ The `stories` field starts empty and is populated by `arch_breakdown` when it cr
 `dev_implementer` currently starts coding immediately. This design adds a plan-before-code step.
 
 **New workflow for `dev_implementer`:**
-1. Read the story issue and its parent epic's breakdown; update the breakdown's frontmatter to `status: in-progress`
+1. Read the story issue and its parent epic's breakdown. If the breakdown file exists, update its frontmatter to `status: in-progress`. If the breakdown file is missing, log a warning and proceed — the implementer's own plan file (step 2) is the primary artifact.
 2. **Write implementation plan** to `plans/story-<N>-impl.md` with frontmatter
 3. Proceed with implementation (existing behavior)
 
@@ -309,7 +310,7 @@ Seven hats receive instruction updates:
 |-----|-----------------|-------------|
 | `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:design-review`. |
 | `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:plan-review`. Also updates the parent design's frontmatter to `status: in-progress` when starting breakdown work. |
-| `arch_breakdown` | Creates story issues from breakdown comment | Also updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
+| `arch_breakdown` | Creates story issues from breakdown comment | Reads the breakdown FILE at `plans/epic-<N>-breakdown.md` for story creation (not the GitHub comment). Updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
 | `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress` whenever the plan file is written (initial creation or revision after code-review rejection). Also updates the parent breakdown's frontmatter to `status: in-progress` when starting story work. |
 | `dev_code_reviewer` | Reviews code without plan context | Reads `plans/story-<N>-impl.md` to validate implementation matches the plan. Checks for plan drift. |
 | `qe_test_designer` | Reads story acceptance criteria from issue | Also reads the parent epic's breakdown file for test scope and inter-story dependency context. |
@@ -378,11 +379,12 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 
 ## 5. Error Handling
 
-- **Missing plan file:** If a downstream hat expects a plan file and it doesn't exist, the hat proceeds without it and logs a warning in the issue comment. Plan files enhance the workflow but are not hard blockers. This prevents a missing file from stalling the entire pipeline.
+- **Missing plan file (consuming hats):** If a read-only consumer (`dev_code_reviewer`, `qe_test_designer`, `qe_verifier`) expects a plan file and it doesn't exist, the hat proceeds using other available context (issue content, acceptance criteria) and logs a warning in the issue comment. Plan files enhance these hats' work but are not hard blockers.
+- **Missing parent plan file (parent-status updates):** If a hat needs to update a parent file's status (`arch_planner` updating the design's status, `dev_implementer` updating the breakdown's status) and the parent file doesn't exist, the hat skips the status update and logs a warning. The hat's primary work (writing its own plan file) is not blocked by a missing parent file.
+- **Missing plan file (producing hats):** If a producing hat (`arch_designer`, `arch_planner`, `dev_implementer`) fails to write its own plan file, this is a processing error. The hat logs the failure in the issue comment and reports the attempt as failed.
 - **Malformed frontmatter:** If frontmatter is missing or unparseable, the hat treats the file as `status: draft, revision: 1` (safe defaults). The hat does not crash or reject.
 - **Concurrent writes:** Plan files are written by one hat at a time (the workflow is serial). No concurrent write conflicts. If git merge conflicts occur during team repo sync, the latest revision (higher `revision` number) takes precedence.
 - **Stale plan references:** If a plan references story issues that no longer exist (closed, deleted), downstream hats skip those references. The plan file itself is not invalidated.
-- **File write failure:** If a hat fails to write a plan file (disk error, permission issue), the hat continues with its primary action (posting the GitHub comment, starting implementation). The missing plan file is noted in the issue comment as a warning.
 
 ---
 
@@ -402,13 +404,13 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 
 - **Given** an implementation plan is revised after code-review rejection, **when** the revised plan is written, **then** the frontmatter `revision` field is incremented, `status` remains `in-progress`, and `updated` date reflects the revision date.
 
-- **Given** `arch_breakdown` creates story issues from a breakdown, **when** issues are created, **then** the breakdown file's `stories` field is updated with the created issue numbers.
+- **Given** `arch_breakdown` creates story issues from a breakdown, **when** the hat reads the breakdown file at `plans/epic-<N>-breakdown.md`, **then** it creates story issues from the file content and updates the file's `stories` field with the created issue numbers.
 
 - **Given** `arch_planner` starts decomposing a design, **when** the planner reads the approved design doc, **then** the design doc's frontmatter is updated to `status: in-progress`.
 
 - **Given** `arch_planner` transitions a breakdown to `lead:plan-review`, **when** the transition occurs, **then** the breakdown file's frontmatter is updated to `status: in-review`.
 
-- **Given** `dev_implementer` starts working on a story, **when** the implementer reads the parent breakdown, **then** the breakdown file's frontmatter is updated to `status: in-progress`.
+- **Given** `dev_implementer` starts working on a story, **when** a breakdown file exists at `plans/epic-<N>-breakdown.md`, **then** the breakdown file's frontmatter is updated to `status: in-progress`. **When** no breakdown file exists, **then** the implementer logs a warning and proceeds to write its own implementation plan.
 
 - **Given** `arch_designer` transitions a design to `lead:design-review`, **when** the transition occurs, **then** the design doc's frontmatter is updated to `status: in-review` and the `updated` date reflects the transition date.
 
