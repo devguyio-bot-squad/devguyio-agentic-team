@@ -2,7 +2,7 @@
 type: design
 status: draft
 epic: "106"
-revision: 1
+revision: 2
 created: 2026-04-04
 updated: 2026-04-04
 author: bob (superman)
@@ -23,7 +23,7 @@ BotMinter currently operates at Tier 2 (supervised agentic SDLC): the agent wear
 
 This creates two systemic problems:
 
-1. **Throughput bottleneck.** The agent produces designs in hours; the single human reviews on a different cadence. Five designs (#114-#118) parked at `po:design-review` simultaneously demonstrates the asymmetry — the agent is idle while reviews accumulate.
+1. **Throughput bottleneck.** The agent produces designs in hours; the single human reviews on a different cadence. Six designs (#114, #116–#120) parked at `po:design-review` simultaneously demonstrates the asymmetry — the agent is idle while reviews accumulate.
 
 2. **Missing enforcement infrastructure.** When the agent does work, quality is enforced by prose instructions and judgment. ADR-0007 prohibits `eprintln!` in domain modules; 9 violations exist undetected. Plans fragment across GitHub comments and ephemeral context. No quality metrics are collected. The agent "tries harder" instead of having systematic feedback on what works.
 
@@ -84,7 +84,7 @@ BotMinter is a multi-binary Rust application:
 - **Agent CLI** (`bm-agent`) — agent-consumed tools (3 command groups: `inbox`, `claude`, `loop`)
 - **HTTP Daemon** (`daemon/`) — Axum background process with JSON API (9 source files)
 - **Web Console** (`web/`) — Axum routes + SvelteKit SPA via `rust-embed` (9 source files)
-- **16 domain modules** under `crates/bm/src/` following ADR-0006 and ADR-0007
+- **19 modules** under `crates/bm/src/` (16 domain + 3 CLI-layer: `cli`, `commands`, `agent_cli`) following ADR-0006 and ADR-0007
 - **11 ADRs**, **11 project invariants**, **4 test tiers** (unit, integration, e2e, exploratory)
 
 The team repo (`team/`) is the coordination control plane — knowledge, invariants, hat configurations, and workflow artifacts. The agent's workspace has the project repo at `./` with team at `team/`.
@@ -143,13 +143,15 @@ Phase 3 — Capstone (least coupled, benefits from all)
 ### 2.4 Dependency Graph
 
 ```
-#114 ────────┐
-             ├──► #118 (needs check runner + metrics data)
-#117 ────────┤
-             ├──► #119 (needs check results + quality signals)
-#117 ────────┘
+#114 ────────┬──► #118 (needs check script conventions + metrics data)
+             │
+             └──► #119 (needs check_scripts_pass signal + quality data)
+                    ▲
+#117 ────────┬──────┘
+             │
+             └──► #118 (metrics data for gardening trends)
 
-#116 ────────── (independent — consumed by downstream hats after delivery)
+#116 ────────── (independent — artifacts consumed by #119 reversal cascade)
 
 #120 ────────── (independent — benefits from all, requires none)
 ```
@@ -162,18 +164,16 @@ Dependency relationships are soft at Phase 2: both #118 and #119 document fallba
 
 ### 3.1 Cross-Cutting Integration Points
 
-The six sub-epics interact through defined interfaces, not ad-hoc coupling:
+The six sub-epics interact through a small number of verified interfaces. Most sub-epics are independent; cross-cutting integration is limited to Phase 2's dependency on Phase 1 outputs and one reversal-cascade touchpoint:
 
-| Producer | Consumer | Interface | What Flows |
-|----------|----------|-----------|------------|
-| #114 Check Runner | #118 Gardening | `run-checks.sh` exit code + `VIOLATION` output | Whether invariant checks pass before gardening commits |
-| #114 Check Runner | #119 Risk Classifier | `run-checks.sh` exit code | `check_scripts_pass` signal for risk assessment |
-| #117 Build-Test Collector | #119 Risk Classifier | `build-test.jsonl` entries | Rejection rate and quality trends for trust decisions |
-| #117 Workflow Collector | Gardening Reports | `workflow.jsonl` entries | Cycle time data for quality summaries |
-| #116 Plan Artifacts | #119 Risk Classifier | Design doc frontmatter | `revision` count as a risk signal |
-| #118 Gardening Scanner | #120 CLAUDE.md Convention | `FINDING` output | Staleness detection for CLAUDE.md sections |
-| #120 `bm-agent env check` | #118 Gardening | `dev-boot.yml` tool list | Whether gardening prerequisites are installed |
-| #120 `bm-agent project describe` | #116 Plan Grounding | JSON project snapshot | Current-state data for plan artifact validation |
+| Producer | Consumer | Interface | What Flows | Verified In |
+|----------|----------|-----------|------------|-------------|
+| #114 Check Runner | #119 Risk Classifier | `run-checks.sh` exit code | `check_scripts_pass` signal for risk assessment (null if #114 not deployed) | epic-119.md §3.2 signal table |
+| #117 Build-Test Collector | #119 Risk Classifier | `build-test.jsonl` entries | Rejection rate and quality trends for trust decisions (defaults to conservative if absent) | epic-119.md §3.2 signal table |
+| #117 Build-Test Collector | #114 Check Runner | `check_violations` field in JSONL | When #114 ships, build-test collector conditionally adds violation count | epic-117.md §3.1 collector spec |
+| #119 Reversal Cascade | #116 Plan Artifacts | Breakdown file frontmatter | Flags `invalidated_by_reversal: true` on plan docs when a design gate is reversed | epic-119.md §3.5 reversal cascade |
+
+**Shared conventions (not interfaces):** #114 and #118 both use the `team/coding-agent/skills/` directory convention and the `invariants/checks/` directory for script placement. #117 and #118 both write to `team/projects/<project>/metrics/` but use separate files (JSONL vs `gardening-last-run.txt`). These are location conventions, not data-flow interfaces.
 
 ### 3.2 Shared Conventions
 
@@ -210,7 +210,7 @@ Multiple sub-epics modify the same hat instructions. The changes are additive (e
 | `dev_code_reviewer` | Run check runner | Read impl plan | Read build-test metrics | — | — | — |
 | `qe_test_designer` | — | Read breakdown file | — | — | — | Run env check |
 | `qe_verifier` | Run check runner | Read impl plan | Call build-test collector | — | — | — |
-| `po_reviewer` | — | — | — | — | Gate policy engine | — |
+| `po_reviewer` | — | — | — | — | Major rework: gate policy engine, auto-advance, reversal cascade, demotion | — |
 | Board scanner | — | — | Quality report trigger | Gardening trigger | — | — |
 | (new) `gardener` | — | — | — | Handle `gardening.scan` | — | — |
 
@@ -282,7 +282,7 @@ No other new hats, statuses, or events are introduced. The existing workflow ope
 | Area | Change | Sub-Epics |
 |------|--------|-----------|
 | Team repo: new directories | `checks/`, `skills/`, `metrics/`, `plans/`, `reports/`, `autonomy/` | All |
-| Hat instructions | 10 hats gain new steps (additive, no removal) | #114, #116, #117, #119, #120 |
+| Hat instructions | 10 hats gain new steps (additive, no removal); `po_reviewer` substantially reworked by #119 | #114, #116, #117, #118, #119, #120 |
 | ralph.yml | 1 new hat (`gardener`) | #118 |
 | Board scanner skill | Gardening trigger + quality report trigger | #117, #118 |
 | Project repo: `bm-agent` | 3 new subcommands, structured error output | #120 |
@@ -293,15 +293,15 @@ No other new hats, statuses, or events are introduced. The existing workflow ope
 
 ### 5.2 What Does NOT Change
 
-- **Ralph Orchestrator** — no orchestrator-level code changes across any sub-epic
+- **Ralph binary/library code** — no source code changes to the Ralph orchestrator itself. Orchestration behavior changes through hat instructions (10 modified, see §3.3), configuration (1 new hat `gardener` in ralph.yml via #118), and board scanner skill logic (2 new triggers via #117 and #118). #119 substantially reworks `po_reviewer` hat instructions (gate policy engine, auto-advance, reversal cascade, demotion logic) but this is hat configuration, not orchestrator code.
 - **Status graph** — no new statuses, no modified transitions
-- **Existing test infrastructure** — unit/integration/e2e/exploratory tests are unmodified (except exploratory gains parallel structured output)
+- **Existing test infrastructure** — unit/integration/e2e/exploratory tests are unmodified (except exploratory gains structured `RESULT` output via #120)
 - **BotMinter CLI** (`bm`) — operator-facing CLI is unchanged
 - **Daemon HTTP API** — already produces structured JSON; no changes
 - **Web console** — frontend is unmodified
 - **Existing 11 ADRs** — no ADRs are modified or superseded
 - **Existing 11 invariants** — prose invariants remain; check scripts are additive enforcement
-- **Bridge, formation, git, profile modules** — no domain module changes (except #120's error classification is applied to `bm-agent` command layer, not domain modules)
+- **Bridge, formation, git, profile modules** — no domain module changes (#120's error classification and new commands are applied to `bm-agent` command layer and new `legibility.rs` module, not existing domain modules)
 
 ### 5.3 Delivery Independence
 
