@@ -12,7 +12,7 @@
 BotMinter's SDLC workflow produces no structured quality data. Three categories of raw data exist but go unconsumed:
 
 - **Board scan log** (`poll-log.txt`) — timestamped dispatch entries, but no cycle time extraction
-- **Loop history** (`.ralph/history.jsonl`) — iteration starts/completions with outcomes, but no failure rate analysis
+- **Loop history** (`.ralph/history.jsonl`) — loop session boundaries (`loop_started` with prompt, `loop_completed` with reason), but no session duration or completion-reason analysis
 - **Cargo test output** — pass/fail exit codes, but no test count tracking or result archiving
 
 Without quality data:
@@ -43,7 +43,7 @@ This epic brings that pattern to BotMinter: collect metrics that already exist a
 - Workflow metric collection from GitHub issue timeline
 - Agent performance metrics from Ralph loop history
 - Feedback integration into 4 hats (`dev_implementer`, `dev_code_reviewer`, `qe_verifier`, `arch_designer`)
-- Periodic quality summary reports (content writer issue)
+- On-demand quality summary reports (operator-triggered content writer issue)
 
 ### Out of Scope
 
@@ -70,7 +70,7 @@ The project repo already produces:
 
 The team repo/workspace already produces:
 - `poll-log.txt` — board scan entries with timestamps and dispatch decisions
-- `.ralph/history.jsonl` — loop iteration records with start/end times, outcomes, failure reasons
+- `.ralph/history.jsonl` — loop session boundaries: `loop_started` entries (with prompt) and `loop_completed` entries (with reason: `consecutive_failures`, `completion_promise`, or `max_iterations`). No per-iteration records — each entry represents a full loop session, not individual iterations within a session
 - GitHub issue comments — status transitions with ISO timestamps (via attribution comments)
 
 These are all raw data sources. This design extracts, structures, and feeds them back.
@@ -107,7 +107,7 @@ Metric collection happens at natural workflow moments — not as a separate step
 | `dev_implementer` finishes build/test | build-test-collector | Build time, test pass/fail counts, test duration, clippy warnings |
 | `qe_verifier` runs verification | build-test-collector | Same, with verification-phase context |
 | Issue reaches terminal status (`done`) | workflow-collector | Time in each status, total cycle time, rejection count |
-| Ralph loop completes | agent-collector | Iteration duration, outcome, failure count |
+| Ralph loop completes | agent-collector | Session count, session duration (from paired start/end timestamps), completion reasons |
 
 ### 2.4 Storage Model
 
@@ -210,16 +210,32 @@ test result: ok. 128 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; fi
 
 **Integration:** Called when an issue reaches terminal status (`done`). The board scanner's auto-advance logic for `po:merge` → `done` triggers this collector before closing the issue.
 
+**Auto-advance failure semantics:** If the collector fails (GitHub API rate limit, network error, comment parsing failure), auto-advance proceeds normally — the issue is still closed and transitions to `done`. Missing workflow metrics never block workflow progression. The collector logs a warning to stderr; the metric entry for that issue is simply absent from `workflow.jsonl`.
+
 ### 3.3 Agent Performance Collector
 
 **Script:** `team/coding-agent/skills/metrics/agent-collector.sh`
 
-**Input:** Ralph root directory
+**Input:** Ralph root directory, project name
+
+**Actual data source:** `.ralph/history.jsonl` contains two entry types:
+
+```json
+{"ts":"2026-03-28T01:50:07Z","type":{"kind":"loop_started","prompt":"..."}}
+{"ts":"2026-03-30T20:53:09Z","type":{"kind":"loop_completed","reason":"consecutive_failures"}}
+```
+
+Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair represents an entire Ralph loop session (which may contain many internal iterations). There are no per-iteration records, no per-iteration duration fields, and no event-emission counts.
 
 **What it does:**
-1. Reads `.ralph/history.jsonl` (last N entries since the previous collection)
-2. Computes: average iteration duration, failure rate, consecutive failure streaks, events emitted
-3. Appends a JSON line to `team/projects/<project>/metrics/agent.jsonl`
+1. Reads `.ralph/history.jsonl` (entries since the previous collection timestamp, stored in `team/projects/<project>/metrics/.agent-cursor`)
+2. Pairs `loop_started` and `loop_completed` entries by adjacency (a `loop_completed` pairs with the most recent preceding `loop_started`)
+3. Computes session-level metrics from the paired entries:
+   - **session_count:** number of completed sessions in the window
+   - **avg_session_duration_secs:** average wall-clock time from `loop_started.ts` to `loop_completed.ts`
+   - **completion_reasons:** count of each reason (`completion_promise`, `max_iterations`, `consecutive_failures`)
+   - **failure_rate:** proportion of sessions ending in `consecutive_failures` over total completed sessions
+4. Appends a single JSON line to `team/projects/<project>/metrics/agent.jsonl`
 
 **Output format:**
 
@@ -227,17 +243,20 @@ test result: ok. 128 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; fi
 {
   "ts": "2026-04-04T16:30:00Z",
   "type": "agent",
-  "loop_id": "loop-1234",
-  "iterations": 15,
-  "avg_duration_secs": 120,
-  "failures": 2,
-  "failure_rate": 0.13,
-  "max_consecutive_failures": 1,
-  "total_events_emitted": 12
+  "window_start": "2026-03-28T00:00:00Z",
+  "window_end": "2026-04-04T16:30:00Z",
+  "sessions": 15,
+  "avg_session_duration_secs": 3600,
+  "completion_reasons": {
+    "completion_promise": 8,
+    "max_iterations": 5,
+    "consecutive_failures": 2
+  },
+  "failure_rate": 0.13
 }
 ```
 
-**Integration:** Called at the end of each Ralph loop session (when `LOOP_COMPLETE` is emitted) or periodically during idle board scanner cycles.
+**Integration:** Called at the end of each Ralph loop session (when `LOOP_COMPLETE` is emitted). The cursor file ensures each session is counted exactly once across collections.
 
 ### 3.4 Metric Summary Script
 
@@ -269,17 +288,19 @@ Four hats receive instruction updates:
 
 ### 3.6 Quality Summary Report
 
-A periodic quality summary is produced as a content writer workflow:
+Quality summary reports are produced on demand via a standalone workflow — the board scanner is NOT involved in report creation. The scanner remains a pure dispatcher.
 
-1. The board scanner checks the timestamp of the last quality report file in `team/projects/<project>/knowledge/reports/`
-2. If >7 days since last report (or no report exists), it creates a `cw:write` issue: "Quality Summary Report — Week of YYYY-MM-DD"
-3. The `cw_writer` hat runs `summary.sh` and writes the report to `team/projects/<project>/knowledge/reports/quality-YYYY-MM-DD.md`
-4. The issue transitions through the normal content workflow (`cw:write` → `cw:review` → `po:merge` → `done`)
+**Trigger:** The operator creates a `cw:write` issue when they want a quality report (e.g., "Quality Summary Report — Week of 2026-04-04"). Alternatively, hats that read metrics (e.g., `arch_designer` per §3.5) may recommend a report in their issue comments if the last report in `team/projects/<project>/knowledge/reports/` is older than 7 days, but they do not create issues themselves.
 
-Report contents:
+**Workflow once a `cw:write` issue exists:**
+1. The `cw_writer` hat runs `summary.sh botminter 7d` to generate a markdown quality report
+2. The hat writes the report to `team/projects/<project>/knowledge/reports/quality-YYYY-MM-DD.md`
+3. The issue transitions through the normal content workflow (`cw:write` → `cw:review` → `po:merge` → `done`)
+
+**Report contents:**
 - **Build health:** average build time, test count trend, failure rate
 - **Workflow efficiency:** average cycle time by issue type, rejection rate, bottleneck statuses
-- **Agent performance:** iteration count, failure rate, streak analysis
+- **Agent performance:** session count, session duration trend, completion reason distribution, failure rate
 - **Notable changes:** metrics that changed >20% from the previous period
 
 ### 3.7 Check Script Integration (Future)
@@ -318,7 +339,8 @@ team/projects/<project>/
   metrics/
     build-test.jsonl   — one entry per build/test run
     workflow.jsonl     — one entry per issue lifecycle completion
-    agent.jsonl        — one entry per loop session or periodic collection
+    agent.jsonl        — one entry per collection (covers loop sessions since previous cursor)
+    .agent-cursor      — timestamp of last agent-collector run
   knowledge/
     reports/
       quality-2026-04-04.md   — weekly quality summary reports
@@ -338,6 +360,7 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 - **Git conflicts on metric files:** JSONL is append-only. Merge conflicts on the same file are resolved by keeping both entries (both lines are valid observations). Conflicts on the same line are unlikely since entries are timestamped.
 - **Stale metrics:** The summary script applies recency weighting — metrics older than 30 days are excluded from trend calculations.
 - **GitHub API rate limits:** The workflow collector reads issue comments via the `github-project` skill, which respects rate limits. If the API call fails, the workflow metric for that issue is skipped — it can be collected on the next opportunity.
+- **Workflow collector failure during auto-advance:** When the workflow collector is triggered during the board scanner's `po:merge` → `done` auto-advance, any collector failure (API, parsing, write) is non-blocking. The auto-advance and issue close proceed normally. The missing metric entry is simply absent from `workflow.jsonl` — there is no retry mechanism since the issue is already closed.
 - **Empty metric files:** If all files are empty (first run), the summary script outputs "No metrics data available yet" and hats proceed without feedback context.
 
 ---
@@ -352,7 +375,9 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 
 - **Given** `qe_verifier` runs verification, **when** test counts are compared against the implementation-phase entry, **then** a decrease in test count is flagged as a concern in the verification comment.
 
-- **Given** no quality report has been produced in the last 7 days, **when** the board scanner detects this, **then** a `cw:write` issue is created for a quality summary report.
+- **Given** a `cw:write` issue for a quality summary report exists, **when** the `cw_writer` hat runs `summary.sh`, **then** a markdown report is written to `team/projects/<project>/knowledge/reports/quality-YYYY-MM-DD.md` with build health, workflow efficiency, and agent performance sections.
+
+- **Given** a Ralph loop session completes (LOOP_COMPLETE), **when** the agent-collector runs, **then** a JSONL entry is appended to `agent.jsonl` with session count, average session duration, completion reason distribution, and failure rate computed from paired `loop_started`/`loop_completed` entries in `history.jsonl`.
 
 - **Given** the metric summary script runs with a 7-day window, **when** data exists for all three metric types, **then** the output includes build health, workflow efficiency, and agent performance sections with trend indicators.
 
@@ -371,7 +396,8 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 | `dev_code_reviewer` hat instructions | Read build-test metrics during review |
 | `qe_verifier` hat instructions | Call build-test collector; compare against implementation-phase metrics |
 | `arch_designer` hat instructions | Read metric summary for project health context |
-| Board scanner | Add quality report trigger check (timestamp comparison) |
+| Board scanner (auto-advance) | Call workflow-collector during `po:merge` → `done` auto-advance; non-blocking on failure |
+| `cw_writer` hat instructions | Run `summary.sh` when handling quality summary report issues |
 
 **No changes to:** Ralph Orchestrator, BotMinter CLI (`bm`), agent CLI (`bm-agent`), daemon/web console, existing status graph, existing invariant files, existing test infrastructure, existing 11 ADRs, `.planning/` directory, `specs/` directory, check script system (#114), plan artifact system (#116).
 
