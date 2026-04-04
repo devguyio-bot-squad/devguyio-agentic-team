@@ -68,7 +68,7 @@ All plan artifacts share a common format:
 ```markdown
 ---
 type: design | breakdown | implementation
-status: draft | in-review | approved | in-progress | complete
+status: draft | in-review | in-progress
 parent: 114          # issue number this plan belongs to
 revision: 1
 created: 2026-04-04
@@ -90,40 +90,35 @@ updated: 2026-04-04
 
 ### 2.3 Plan Lifecycle
 
-Plan status maps to the existing SDLC workflow:
+Plan status tracks three states. Every transition has a named responsible hat:
 
 ```
-              arch_designer writes
-                    │
-                    ▼
-               ┌─────────┐
-               │  draft   │
+               ┌─────────┐     producing hat creates
+               │  draft   │     (arch_designer, arch_planner)
                └────┬─────┘
-                    │  hat transitions to review
+                    │  producing hat transitions to review gate
                     ▼
-               ┌─────────┐
-               │in-review │  ◄── lead_reviewer / po_reviewer evaluating
-               └────┬─────┘
-                    │  approved (or rejected → back to draft)
+               ┌──────────┐    plan under lead/po review
+               │ in-review │    (lead_reviewer / po_reviewer evaluating)
+               └────┬──────┘
+                    │  rejected → producing hat revises → back to draft
+                    │  approved → consuming hat starts work
                     ▼
-               ┌─────────┐
-               │ approved │
-               └────┬─────┘
-                    │  downstream hat starts work based on this plan
-                    ▼
-               ┌──────────────┐
-               │ in-progress  │  ◄── arch_planner using design, dev_implementer coding
-               └──────┬───────┘
-                      │  work finished
-                      ▼
-               ┌──────────┐
-               │ complete  │
-               └───────────┘
+               ┌──────────────┐  consuming hat is actively using the plan
+               │  in-progress  │  (arch_planner using design, dev_implementer using breakdown)
+               └───────────────┘
 ```
 
-Status transitions in plan frontmatter mirror the issue status transitions. The hat that produces a design or breakdown sets `draft`. When the plan's review status is reached (e.g., `lead:design-review` for designs), the plan status becomes `in-review`. On approval, `approved`. When the next phase starts consuming the plan, `in-progress`. When all downstream work is done, `complete`.
+| Transition | Responsible Hat | Trigger |
+|------------|----------------|---------|
+| → `draft` | Producing hat (`arch_designer`, `arch_planner`) | Plan file created or revised after rejection |
+| `draft` → `in-review` | Producing hat (`arch_designer`, `arch_planner`) | Issue transitions to review gate (`lead:design-review`, `lead:plan-review`) |
+| `in-review` → `draft` | Producing hat | Rejection feedback received; revision written |
+| `in-review` → `in-progress` | Consuming hat (`arch_planner`, `dev_implementer`) | Downstream hat starts using the approved plan |
 
-Implementation plans are an exception — they enter the lifecycle at `in-progress` because they are unreviewed working documents produced by `dev_implementer` immediately before coding, not gated artifacts that pass through review. They skip `draft`, `in-review`, and `approved` entirely.
+`approved` and `complete` are not tracked in plan frontmatter. Approval is already captured by the issue moving past the review gate — if the consuming hat is running, the plan was approved. Completion is captured by the issue closing. Tracking these would create redundant state with no consumer.
+
+Implementation plans are an exception — they enter the lifecycle at `in-progress` directly because they are unreviewed working documents produced by `dev_implementer` immediately before coding. They skip `draft` and `in-review`.
 
 ### 2.4 Relationship to Existing Planning Artifacts
 
@@ -163,7 +158,7 @@ A hat looking for a design reads `designs/epic-<N>.md`. A hat looking for a brea
 ```yaml
 ---
 type: design | breakdown | implementation
-status: draft | in-review | approved | in-progress | complete
+status: draft | in-review | in-progress
 parent: 116          # issue number this plan belongs to
 revision: 1          # incremented on each revision
 created: 2026-04-04  # ISO date of first version
@@ -292,9 +287,9 @@ Seven hats receive instruction updates:
 | Hat | Current Behavior | New Behavior |
 |-----|-----------------|-------------|
 | `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` on creation, `status: in-review` on transition to `lead:design-review`. |
-| `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft`. |
+| `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft` on creation, `status: in-review` on transition to `lead:plan-review`. Also updates the parent design's frontmatter to `status: in-progress` when starting breakdown work. |
 | `arch_breakdown` | Creates story issues from breakdown comment | Also updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
-| `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress`. |
+| `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress`. Also updates the parent breakdown's frontmatter to `status: in-progress` when starting story work. |
 | `dev_code_reviewer` | Reviews code without plan context | Reads `plans/story-<N>-impl.md` to validate implementation matches the plan. Checks for plan drift. |
 | `qe_test_designer` | Reads story acceptance criteria from issue | Also reads the parent epic's breakdown file for test scope and inter-story dependency context. |
 | `qe_verifier` | Verifies against acceptance criteria | Also reads the implementation plan for verification context (intended approach, affected files, test strategy). |
@@ -335,7 +330,7 @@ Plan files are git-tracked. Revision history is captured both in the frontmatter
 ```yaml
 # Required for all plan types
 type: string         # "design" | "breakdown" | "implementation"
-status: string       # "draft" | "in-review" | "approved" | "in-progress" | "complete"
+status: string       # "draft" | "in-review" | "in-progress"
 parent: integer      # GitHub issue number
 revision: integer    # starts at 1, incremented on each revision
 created: string      # ISO date (YYYY-MM-DD)
@@ -384,6 +379,12 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 
 - **Given** `arch_breakdown` creates story issues from a breakdown, **when** issues are created, **then** the breakdown file's `stories` field is updated with the created issue numbers.
 
+- **Given** `arch_planner` starts decomposing a design, **when** the planner reads the approved design doc, **then** the design doc's frontmatter is updated to `status: in-progress`.
+
+- **Given** `arch_planner` transitions a breakdown to `lead:plan-review`, **when** the transition occurs, **then** the breakdown file's frontmatter is updated to `status: in-review`.
+
+- **Given** `dev_implementer` starts working on a story, **when** the implementer reads the parent breakdown, **then** the breakdown file's frontmatter is updated to `status: in-progress`.
+
 - **Given** a plan file has malformed or missing frontmatter, **when** a hat reads it, **then** the hat treats it as `status: draft, revision: 1` and proceeds without error.
 
 ---
@@ -393,9 +394,9 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 | Component | Change |
 |-----------|--------|
 | `arch_designer` hat instructions | Add YAML frontmatter to design doc output |
-| `arch_planner` hat instructions | Write breakdown file alongside GitHub comment |
+| `arch_planner` hat instructions | Write breakdown file alongside GitHub comment; set breakdown `in-review` on transition; update parent design status to `in-progress` |
 | `arch_breakdown` hat instructions | Update breakdown file's `stories` field after creating issues |
-| `dev_implementer` hat instructions | Write implementation plan before coding |
+| `dev_implementer` hat instructions | Write implementation plan before coding; update parent breakdown status to `in-progress` |
 | `dev_code_reviewer` hat instructions | Read implementation plan during review |
 | `qe_test_designer` hat instructions | Read breakdown file for test scope |
 | `qe_verifier` hat instructions | Read implementation plan for verification context |
