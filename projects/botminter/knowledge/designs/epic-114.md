@@ -121,8 +121,8 @@ All scripts live in `projects/botminter/invariants/checks/`:
 
 | Script | Invariant | What It Checks |
 |---|---|---|
-| `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 non-test lines (soft threshold per ADR-0007's "~300" qualifier). Exclude `target/`, test fixtures. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
-| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/src/` and `crates/bm/tests/`. Flags usages in test code that lack corresponding `tempdir()` setup. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. |
+| `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 total lines (soft threshold per ADR-0007's "~300" qualifier). Counts all lines — no `#[cfg(test)]` block exclusion, since `wc -l` cannot distinguish test code from production code and ADR-0007 states the ~300 limit without a test-exclusion caveat. Excludes `target/`, test fixtures. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
+| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/tests/` **only**. Flags any usage in test code — test files should use `tempdir()` or equivalent isolation, never the real home directory. Production code (`crates/bm/src/`) is **excluded**: `dirs::home_dir()` is used legitimately there (e.g., `config/mod.rs` for config resolution, `formation/lima.rs` for VM paths). The check does not attempt semantic tempdir-pairing analysis — it simply reports `home_dir` calls in test files as violations. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. |
 | `domain-layer-imports.sh` | ADR-0007 | Greps for `println!`, `eprintln!`, `use clap`, `use comfy_table`, `use dialoguer`, `use cliclack` in all dirs under `crates/bm/src/` except the command layer (`commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`). Uses directory exclusion — new domain modules are scanned automatically. |
 | `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` (partial) | Known profile name strings (`"scrum-compact"`, `"scrum"`) in `.rs` files. Excludes `tests/`, `test-fixtures/`, `profiles/`. **Caveat:** This check enforces the profile-name subset of the `no-hardcoded-profiles` invariant. The full invariant also prohibits hardcoded role names, status values, label names, and other profile-derived data — those remain enforced by agent judgment during code review, as they require semantic understanding of what constitutes "profile-derived data." |
 
@@ -167,7 +167,7 @@ exit $((violations > 0 ? 1 : 0))
 ```
 
 **Known limitations and false positives:**
-- `eprintln!` in `#[cfg(test)]` blocks: test code may legitimately use `eprintln!` for debugging. The flat `grep -rn` implementation has **no `#[cfg(test)]` block awareness** — it cannot distinguish test code from production code within the same file. Excluding test blocks from grep-based shell scripts is non-trivial (requires multi-pass processing to identify block line ranges). **Mitigation:** A `# check:ignore` inline comment suppresses the violation for that line. The implementation story should document the suppression syntax and add it to the check script contract.
+- `eprintln!` in `#[cfg(test)]` blocks: test code may legitimately use `eprintln!` for debugging. The flat `grep -rn` implementation has **no `#[cfg(test)]` block awareness** — it cannot distinguish test code from production code within the same file. Excluding test blocks from grep-based shell scripts is non-trivial (requires multi-pass processing to identify block line ranges). **Mitigation:** A `// check:ignore` inline comment (Rust line comment syntax) suppresses the violation for that line. The implementation story should document the suppression syntax and add it to the check script contract.
 - String literals containing pattern words (e.g., `"eprintln! is prohibited"`): unlikely in domain modules; low false positive risk.
 
 ### 3.4 Known First-Run Violations
@@ -220,7 +220,7 @@ The project CLAUDE.md (`projects/botminter/CLAUDE.md`) gains:
 - **Given** the existing 9 `eprintln!` violations, **when** `domain-layer-imports.sh` runs, **then** each is reported with file path, line numbers, and specific remediation.
 - **Given** a new `.sh` script is added to either checks directory, **when** the runner executes, **then** the new script is discovered and run automatically.
 - **Given** a check script has a syntax error (exit >1), **when** the runner executes it, **then** the crash is logged as a warning but does not block review.
-- **Given** a `# check:ignore` comment is placed on a line with `eprintln!` in a domain module, **when** `domain-layer-imports.sh` runs, **then** that line is excluded from violations.
+- **Given** a `// check:ignore` comment is placed on a line with `eprintln!` in a domain module, **when** `domain-layer-imports.sh` runs, **then** that line is excluded from violations.
 
 ---
 
@@ -245,6 +245,6 @@ Check scripts are read-only file analyzers. They scan code with `grep`/`find` �
 
 **Attack surface:** A malicious check script could only read files the agent already has access to. The runner does not execute arbitrary user input — it discovers and runs `.sh` files from known directories.
 
-**Crash isolation:** Three consecutive crashes from the same script are classified as crashes (not violations) and logged. The runner does not retry crashed scripts — it reports them and continues with the remaining checks.
+**Crash isolation:** The runner is stateless — each invocation is a single run with no cross-run state. A crashed script (exit 1 without VIOLATION output, or exit >1) is logged as a warning and skipped. The runner does not retry crashed scripts within a run — it reports the crash and continues with the remaining checks. No crash-count tracking across invocations is performed.
 
 **No secret exposure:** Check scripts operate on source code files only. They do not access `.env`, credentials, or runtime secrets.
