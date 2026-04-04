@@ -107,7 +107,7 @@ Metric collection happens at natural workflow moments — not as a separate step
 | `dev_implementer` finishes build/test | build-test-collector | Build time, test pass/fail counts, test duration, clippy warnings |
 | `qe_verifier` runs verification | build-test-collector | Same, with verification-phase context |
 | Issue reaches terminal status (`done`) | workflow-collector | Time in each status, total cycle time, rejection count |
-| Ralph loop completes | agent-collector | Session count (completed + abandoned), session duration, completion reasons |
+| Ralph loop completes | agent-collector | Session count (successful + incomplete + failed + abandoned), session duration, completion reasons, three-category rates |
 
 ### 2.4 Storage Model
 
@@ -138,12 +138,14 @@ Metrics flow back to agents in two ways:
 
 **Script:** `team/coding-agent/skills/metrics/build-test-collector.sh`
 
-**Input:** Project name, issue number, phase (implement/verify)
+**Input:** Project name, issue number, phase (implement/verify), path to captured test output file, optionally path to captured clippy output file
+
+**Role:** The collector is a **parser and recorder** — it never runs `cargo test`, `cargo build`, or `cargo clippy` itself. Hats run build/test commands as their primary work and capture the output to a temp file. The collector then parses that captured output and appends a structured metric entry. This separation ensures builds execute exactly once per step (by the hat) and metric collection is a side-effect, not a duplicate execution.
 
 **What it does:**
-1. Runs `cargo test` in the project directory, capturing the summary line (`test result: ok. N passed; M failed; I ignored; ...`)
-2. Captures build duration (wall clock via `time` or `date` bracketing)
-3. Runs `cargo clippy --message-format=json` if available, counts warning entries
+1. Reads the captured `cargo test` output file (provided via `--test-output` argument) and parses the `test result:` summary line to extract pass/fail/ignored counts and test duration
+2. Reads the build duration from a `--build-secs` argument (the calling hat measures wall-clock time around its build step using `date` bracketing)
+3. If `--clippy-output` is provided, reads the captured `cargo clippy --message-format=json` output file and counts warning entries
 4. Appends a single JSON line to `team/projects/<project>/metrics/build-test.jsonl`
 
 **Output format:**
@@ -164,13 +166,27 @@ Metrics flow back to agents in two ways:
 }
 ```
 
-**Integration:** `dev_implementer` and `qe_verifier` hat instructions call this after running builds/tests:
+**Integration:** Hats capture their build/test output, then pass it to the collector:
 
 ```bash
-bash team/coding-agent/skills/metrics/build-test-collector.sh botminter --issue 42 --phase implement
+# Hat runs cargo test as normal, capturing output
+BUILD_START=$(date +%s)
+cargo test 2>&1 | tee /tmp/test-output-42.txt
+BUILD_END=$(date +%s)
+BUILD_SECS=$((BUILD_END - BUILD_START))
+
+# Optionally capture clippy output
+cargo clippy --message-format=json 2>/dev/null > /tmp/clippy-output-42.txt
+
+# Collector parses captured output — never runs cargo itself
+bash team/coding-agent/skills/metrics/build-test-collector.sh botminter \
+  --issue 42 --phase implement \
+  --test-output /tmp/test-output-42.txt \
+  --build-secs "$BUILD_SECS" \
+  --clippy-output /tmp/clippy-output-42.txt
 ```
 
-**Cargo test parsing:** The collector parses the standard `test result:` summary line via regex. This is the stable output format across all Rust toolchain versions — no nightly features required. Example parsed line:
+**Cargo test parsing:** The collector parses the standard `test result:` summary line from the captured output file via regex. This is the stable output format across all Rust toolchain versions — no nightly features required. Example parsed line:
 
 ```
 test result: ok. 128 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 12.34s
@@ -236,14 +252,19 @@ Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair
 **What it does:**
 1. Reads `.ralph/history.jsonl` (entries since the previous collection timestamp, stored in `team/projects/<project>/metrics/.agent-cursor`)
 2. Pairs `loop_started` and `loop_completed` entries by adjacency (a `loop_completed` pairs with the most recent preceding `loop_started`). Detects **abandoned sessions**: when two consecutive `loop_started` entries appear without an intervening `loop_completed`, the first session is counted as abandoned (it was killed, crashed, or hung without clean termination)
-3. Computes session-level metrics:
-   - **completed_sessions:** number of sessions with a matching `loop_completed` entry
-   - **abandoned_sessions:** number of `loop_started` entries with no matching `loop_completed` (consecutive starts without intervening completion)
-   - **total_sessions:** `completed_sessions + abandoned_sessions`
+3. Computes session-level metrics using a three-category classification:
+   - **successful_sessions:** completed with `completion_promise` — work finished normally
+   - **incomplete_sessions:** completed with `max_iterations` — agent ran out of iteration budget before finishing. Classified as incomplete (not failed) because: (a) the agent typically made partial progress, and (b) the next loop session picks up where it left off. Classified as not successful because the work was not completed in that session. This is a deliberate design choice — `max_iterations` indicates an iteration budget issue, not an agent capability issue
+   - **failed_sessions:** completed with `consecutive_failures` — repeated failures caused termination
+   - **abandoned_sessions:** `loop_started` with no matching `loop_completed` (consecutive starts without intervening completion) — session was killed, crashed, or hung without clean termination
+   - **total_sessions:** `successful_sessions + incomplete_sessions + failed_sessions + abandoned_sessions`
    - **avg_session_duration_secs:** average wall-clock time from `loop_started.ts` to `loop_completed.ts` (computed only from completed sessions — abandoned sessions have no end timestamp)
    - **completion_reasons:** count of each reason (`completion_promise`, `max_iterations`, `consecutive_failures`) — applies only to completed sessions
-   - **failure_rate:** proportion of non-successful sessions over total sessions: `(consecutive_failures + abandoned_sessions) / total_sessions`. This counts both explicit failures (completed with `consecutive_failures`) and implicit failures (abandoned without clean termination)
-4. Appends a single JSON line to `team/projects/<project>/metrics/agent.jsonl`
+   - **success_rate:** `successful_sessions / total_sessions`
+   - **failure_rate:** `(failed_sessions + abandoned_sessions) / total_sessions`. Counts explicit failures (consecutive_failures) and implicit failures (abandoned). Does NOT include `max_iterations` — those are tracked separately as `incomplete_rate`
+   - **incomplete_rate:** `incomplete_sessions / total_sessions`. Tracks sessions that ran out of budget. A high incomplete_rate suggests iteration limits need tuning, not that agents are failing
+4. **Cursor advancement:** The cursor advances to the timestamp of the **last `loop_completed` entry** in the processed window — NOT to the last entry overall. Trailing `loop_started` entries after the last `loop_completed` remain before the cursor boundary and will be included in the next collection window. When their `loop_completed` arrives in a future session, the pair is intact. If no `loop_completed` exists in the window, the cursor does not advance. This prevents permanently losing sessions that span collection boundaries
+5. Appends a single JSON line to `team/projects/<project>/metrics/agent.jsonl`
 
 **Output format:**
 
@@ -253,7 +274,9 @@ Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair
   "type": "agent",
   "window_start": "2026-03-28T00:00:00Z",
   "window_end": "2026-04-04T16:30:00Z",
-  "completed_sessions": 6,
+  "successful_sessions": 3,
+  "incomplete_sessions": 1,
+  "failed_sessions": 2,
   "abandoned_sessions": 23,
   "total_sessions": 29,
   "avg_session_duration_secs": 3600,
@@ -262,7 +285,9 @@ Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair
     "max_iterations": 1,
     "consecutive_failures": 2
   },
-  "failure_rate": 0.86
+  "success_rate": 0.10,
+  "failure_rate": 0.86,
+  "incomplete_rate": 0.03
 }
 ```
 
@@ -291,9 +316,9 @@ Four hats receive instruction updates:
 
 | Hat | New Behavior |
 |-----|-------------|
-| `dev_implementer` | After build/test, call build-test-collector. Before starting, read build-test entries filtered by issue number (`--issue` field) for this story to check for regressions across iterations (increasing build time, growing clippy warnings). If no entries exist for this issue yet (first build), read the last 3 project-wide entries as a baseline trend — but label them as cross-story context, not as regressions in this branch. |
+| `dev_implementer` | After running `cargo test` and `cargo clippy` as normal work, capture the output to temp files and pass them to build-test-collector for metric recording (see §3.1 integration example). The collector parses — it never re-runs cargo. Before starting, read build-test entries filtered by issue number (`--issue` field) for this story to check for regressions across iterations (increasing build time, growing clippy warnings). If no entries exist for this issue yet (first build), read the last 3 project-wide entries as a baseline trend — but label them as cross-story context, not as regressions in this branch. |
 | `dev_code_reviewer` | Read build-test metrics filtered by the story's branch (`branch` field). Flag if tests failed or clippy warnings increased versus the previous entry for this branch. |
-| `qe_verifier` | After verification build/test, call build-test-collector. Compare test counts against the implementation-phase entry — flag if tests were removed or reduced. |
+| `qe_verifier` | After running verification `cargo test`, capture the output to a temp file and pass it to build-test-collector for metric recording (same pattern as `dev_implementer`). The collector parses captured output — it never re-runs cargo. Compare test counts against the implementation-phase entry — flag if tests were removed or reduced. |
 | `arch_designer` | At the start of design work, read the metric summary (last 7 days) for project health context. Cycle time and rejection rate inform design complexity decisions. |
 
 ### 3.6 Quality Summary Report
@@ -377,7 +402,7 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 
 ## 6. Acceptance Criteria
 
-- **Given** `dev_implementer` runs `cargo test` on a story branch, **when** the build completes, **then** the build-test collector appends a JSONL entry to `team/projects/botminter/metrics/build-test.jsonl` with test counts, build duration, and branch name.
+- **Given** `dev_implementer` runs `cargo test` on a story branch and captures the output to a temp file, **when** the hat passes the captured output to build-test-collector, **then** the collector parses the output (without re-running cargo) and appends a JSONL entry to `team/projects/botminter/metrics/build-test.jsonl` with test counts, build duration, and branch name.
 
 - **Given** a story issue reaches `done` status, **when** the workflow collector runs, **then** a JSONL entry is appended to `workflow.jsonl` with the time spent in each status and the total cycle time.
 
@@ -391,9 +416,13 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 
 - **Given** a `cw:write` issue for a quality summary report exists, **when** the `cw_writer` hat runs `summary.sh`, **then** a markdown report is written to `team/projects/<project>/knowledge/reports/quality-YYYY-MM-DD.md` with build health, workflow efficiency, and agent performance sections.
 
-- **Given** a Ralph loop session completes (LOOP_COMPLETE), **when** the agent-collector runs, **then** a JSONL entry is appended to `agent.jsonl` with `completed_sessions`, `abandoned_sessions`, `total_sessions`, average session duration (from completed sessions only), completion reason distribution, and `failure_rate` computed as `(consecutive_failures + abandoned_sessions) / total_sessions` from `loop_started`/`loop_completed` entries in `history.jsonl`.
+- **Given** a Ralph loop session completes (LOOP_COMPLETE), **when** the agent-collector runs, **then** a JSONL entry is appended to `agent.jsonl` with `successful_sessions` (completion_promise), `incomplete_sessions` (max_iterations), `failed_sessions` (consecutive_failures), `abandoned_sessions`, `total_sessions`, average session duration (from completed sessions only), completion reason distribution, `success_rate`, `failure_rate` = `(failed_sessions + abandoned_sessions) / total_sessions`, and `incomplete_rate` = `incomplete_sessions / total_sessions`.
 
 - **Given** `history.jsonl` contains consecutive `loop_started` entries without an intervening `loop_completed`, **when** the agent-collector processes the window, **then** the first of each consecutive pair is counted as an abandoned session and included in `abandoned_sessions` and the `failure_rate` numerator.
+
+- **Given** the agent-collector processes a window where the last entry is a `loop_started` with no matching `loop_completed`, **when** the cursor is advanced, **then** the cursor advances only to the timestamp of the last `loop_completed` in the window (not the last entry). The trailing `loop_started` remains in the next window so it can be paired with its future `loop_completed`.
+
+- **Given** a completed session has reason `max_iterations`, **when** the agent-collector computes metrics, **then** the session is counted as `incomplete_sessions` (not `successful_sessions` and not `failed_sessions`), contributing to `incomplete_rate` but not to `failure_rate` or `success_rate`.
 
 - **Given** the metric summary script runs with a 7-day window, **when** data exists for all three metric types, **then** the output includes build health, workflow efficiency, and agent performance sections with trend indicators.
 
@@ -408,9 +437,9 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 | `team/coding-agent/skills/metrics/` | New directory with 4 scripts: build-test-collector.sh, workflow-collector.sh, agent-collector.sh, summary.sh |
 | `team/projects/<project>/metrics/` | New directory with 3 JSONL files (created on first run) |
 | `team/projects/<project>/knowledge/reports/` | New directory for periodic quality summary reports |
-| `dev_implementer` hat instructions | Call build-test collector after builds; read recent metrics before starting |
+| `dev_implementer` hat instructions | Capture cargo test/clippy output to temp files and pass to build-test collector for metric recording (collector parses, never re-runs cargo); read recent metrics before starting |
 | `dev_code_reviewer` hat instructions | Read build-test metrics during review |
-| `qe_verifier` hat instructions | Call build-test collector; compare against implementation-phase metrics |
+| `qe_verifier` hat instructions | Capture cargo test output and pass to build-test collector for metric recording (same parse-only pattern); compare against implementation-phase metrics |
 | `arch_designer` hat instructions | Read metric summary for project health context |
 | Board scanner (auto-advance) | Call workflow-collector during `po:merge` → `done` auto-advance; non-blocking on failure. Note: the auto-advance comment itself (`Auto-advance: po:merge → done`) is written AFTER the collector runs, so it will be captured in the NEXT issue's collection window if that issue shares the same timeline — but since workflow metrics are per-issue, this is a non-issue |
 | `cw_writer` hat instructions | Run `summary.sh` when handling quality summary report issues |
