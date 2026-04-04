@@ -118,7 +118,7 @@ Plan status tracks three states. Every transition has a named responsible hat:
 
 `approved` and `complete` are not tracked in plan frontmatter. Approval is already captured by the issue moving past the review gate — if the consuming hat is running, the plan was approved. Completion is captured by the issue closing. Tracking these would create redundant state with no consumer.
 
-Implementation plans are an exception — they enter the lifecycle at `in-progress` directly because they are unreviewed working documents produced by `dev_implementer` immediately before coding. They skip `draft` and `in-review`.
+Implementation plans are an exception — they enter the lifecycle at `in-progress` directly because they are unreviewed working documents produced by `dev_implementer` immediately before coding. They skip `draft` and `in-review`. On revision after code-review rejection, the implementer overwrites the existing plan: increments `revision`, updates the `updated` date, and retains `status: in-progress` (since impl plans never use `draft` or `in-review`).
 
 ### 2.4 Relationship to Existing Planning Artifacts
 
@@ -221,7 +221,7 @@ updated: 2026-04-04
 `arch_planner` currently posts story breakdowns as GitHub issue comments only. This design adds a parallel file write.
 
 **New workflow for `arch_planner`:**
-1. Read the design doc from `designs/epic-<N>.md`
+1. Read the design doc from `designs/epic-<N>.md` and update its frontmatter to `status: in-progress`
 2. Decompose into stories (existing behavior)
 3. **Write breakdown file** to `plans/epic-<N>-breakdown.md` with frontmatter
 4. Post the breakdown as a GitHub comment (existing behavior)
@@ -262,7 +262,7 @@ The `stories` field starts empty and is populated by `arch_breakdown` when it cr
 `dev_implementer` currently starts coding immediately. This design adds a plan-before-code step.
 
 **New workflow for `dev_implementer`:**
-1. Read the story issue and its parent epic's breakdown
+1. Read the story issue and its parent epic's breakdown; update the breakdown's frontmatter to `status: in-progress`
 2. **Write implementation plan** to `plans/story-<N>-impl.md` with frontmatter
 3. Proceed with implementation (existing behavior)
 
@@ -297,6 +297,8 @@ depends_on: []
 
 The implementation plan gives `dev_code_reviewer` and `qe_verifier` inspectable context: what was planned vs what was built.
 
+**Revision after rejection:** When a story is rejected at `dev:code-review` and returns to `dev:implement`, the implementer overwrites the existing plan file: increments `revision`, updates the `updated` date, and retains `status: in-progress` (implementation plans never enter `draft` or `in-review`). No new GitHub comment is posted — the file is the sole artifact. The code reviewer reads the updated plan to see what changed in the approach.
+
 ### 3.5 Hat Instruction Updates
 
 Seven hats receive instruction updates:
@@ -306,7 +308,7 @@ Seven hats receive instruction updates:
 | `arch_designer` | Writes design doc without frontmatter | Adds YAML frontmatter to design docs. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:design-review`. |
 | `arch_planner` | Posts breakdown as GitHub comment only | Writes breakdown file to `plans/epic-<N>-breakdown.md` alongside the comment. Sets `status: draft` whenever the plan file is written (initial creation or revision after rejection), `status: in-review` on transition to `lead:plan-review`. Also updates the parent design's frontmatter to `status: in-progress` when starting breakdown work. |
 | `arch_breakdown` | Creates story issues from breakdown comment | Also updates the breakdown file's `stories` field with created issue numbers after creating story issues. |
-| `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress`. Also updates the parent breakdown's frontmatter to `status: in-progress` when starting story work. |
+| `dev_implementer` | Starts coding immediately | Writes implementation plan to `plans/story-<N>-impl.md` before coding. Sets `status: in-progress` whenever the plan file is written (initial creation or revision after code-review rejection). Also updates the parent breakdown's frontmatter to `status: in-progress` when starting story work. |
 | `dev_code_reviewer` | Reviews code without plan context | Reads `plans/story-<N>-impl.md` to validate implementation matches the plan. Checks for plan drift. |
 | `qe_test_designer` | Reads story acceptance criteria from issue | Also reads the parent epic's breakdown file for test scope and inter-story dependency context. |
 | `qe_verifier` | Verifies against acceptance criteria | Also reads the implementation plan for verification context (intended approach, affected files, test strategy). |
@@ -395,6 +397,8 @@ depends_on: integer[] # GitHub issue numbers of blocking stories
 - **Given** a design doc is revised after rejection feedback, **when** the revised design is written, **then** the frontmatter `revision` field is incremented, `status` is set to `draft`, and `updated` date reflects the revision date.
 
 - **Given** a breakdown file is revised after rejection feedback at `lead:plan-review`, **when** the revised breakdown is written, **then** the frontmatter `revision` field is incremented, `status` is set to `draft`, `updated` date reflects the revision date, and a new GitHub comment is posted with the revised breakdown content.
+
+- **Given** an implementation plan is revised after code-review rejection, **when** the revised plan is written, **then** the frontmatter `revision` field is incremented, `status` remains `in-progress`, and `updated` date reflects the revision date.
 
 - **Given** `arch_breakdown` creates story issues from a breakdown, **when** issues are created, **then** the breakdown file's `stories` field is updated with the created issue numbers.
 
