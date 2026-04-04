@@ -13,7 +13,7 @@ BotMinter's codebase has 11 ADRs in `.planning/adrs/` and 11 project invariants 
 
 This epic adds executable check scripts with structured, agent-readable output. A check runner integrates these into the `dev_code_reviewer` and `qe_verifier` hats and runs in CI.
 
-This is a BotMinter product capability: the check script contract, runner, and baseline profile-generic scripts ship as part of the scrum-compact profile. Each project authors its own project-specific checks. BotMinter dogfoods both levels.
+The check script contract and runner are team-level infrastructure (`team/coding-agent/skills/`). All 4 initial check scripts are project-specific (`projects/botminter/invariants/checks/`) because they enforce Rust-specific and BotMinter-specific rules. Profile-generic checks (in `team/invariants/checks/`) are deferred until genuinely language-agnostic checks are needed.
 
 ### Harness Pattern
 
@@ -27,10 +27,11 @@ Harness enforces a layered domain architecture (Types -> Config -> Repo -> Servi
 
 - Check script contract (output format, exit codes, working directory)
 - Check runner script
-- 4 baseline check scripts (2 profile-generic, 2 project-specific)
+- 4 project-specific check scripts (all in `projects/botminter/invariants/checks/`)
 - Hat instruction updates (`dev_code_reviewer`, `qe_verifier`)
-- CI integration (check runner as a CI step on every PR)
 - CLAUDE.md update (reference check runner and key directories)
+
+**Deferred:** CI integration is deferred to a follow-up story (see §3.6 for rationale).
 
 ### Out of Scope
 
@@ -51,21 +52,18 @@ BotMinter is a multi-binary Rust application with:
 - **HTTP Daemon** (`daemon/`) — background process with Axum HTTP API (9 source files)
 - **Web Console** (`web/`) — Axum routes serving a SvelteKit SPA (9 source files, embedded via `rust-embed`)
 
-The codebase follows ADR-0006 (directory modules) and ADR-0007 (domain-command layering):
+The codebase follows ADR-0006 (directory modules — structural requirement for `foo/mod.rs` layout) and ADR-0007 (domain-command layering — behavioral separation with ~300 line sub-file limit):
 - **16 directory modules** under `crates/bm/src/`
 - **15 domain modules** (everything except `commands/`)
 - **Command layer** = `commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`
 
 Check scripts operate on the project repo source tree. They analyze static code properties — they are not runtime tests.
 
-### 2.2 Two Check Scopes
+### 2.2 Check Scope: Project-Specific
 
-| Scope | Location | Contains |
-|---|---|---|
-| Profile-generic | `team/invariants/checks/` | Checks for any project using scrum-compact |
-| Project-specific | `projects/<project>/invariants/checks/` | Checks for this project's ADRs/invariants |
+All 4 check scripts live in `projects/botminter/invariants/checks/`. They enforce BotMinter-specific ADRs and invariants using Rust-aware patterns (`grep` on `.rs` files, `#[cfg(test)]` awareness, BotMinter-specific paths).
 
-Profile-generic checks are extracted from the scrum-compact profile into `team/invariants/` during `bm init`. Project-specific checks live in the project repo.
+**Why not profile-generic?** The scrum-compact profile is a process profile, not a language profile. All 4 initial checks are Rust-specific (grep `.rs` files, reference `crates/bm/src/`, check for `dirs::home_dir()`). Placing them in `team/invariants/checks/` would claim language-agnostic applicability they don't have. Profile-generic checks are appropriate when genuinely language-agnostic checks exist (e.g., "no files over N lines regardless of extension", "no secrets in committed files"). That boundary is deferred until such a check is needed.
 
 ### 2.3 Check Runner Flow
 
@@ -91,9 +89,9 @@ BotMinter has a three-tier test strategy:
 - **Integration/E2E tests** — `crates/bm/tests/e2e/` with `libtest-mimic` harness, real GitHub API
 - **Exploratory tests** — `crates/bm/tests/exploratory/` with standalone bash scripts per phase
 
-Check scripts are a **fourth tier** — static analysis that runs before any test execution. They catch structural violations early, before agents start coding or testing. They complement, not replace, the existing test infrastructure.
+Check scripts are a **pre-test static analysis gate** — they scan source files with `grep`/`find` without executing any code. They are not a test tier; they are a separate category from the runtime test infrastructure. Static analysis catches structural violations early, before agents start coding or testing. It complements, not replaces, the existing test strategy.
 
-CI runs check scripts as a gate before running `cargo test` and E2E tests. This catches invariant violations before compilation and testing even begin.
+The check runner runs before `cargo test` and E2E tests, catching invariant violations before compilation and testing even begin.
 
 ---
 
@@ -119,19 +117,14 @@ The REMEDIATION line gives the agent its next action. REFERENCE points to the go
 
 ### 3.2 Baseline Check Scripts
 
-**Profile-generic** (`team/invariants/checks/`):
+All scripts live in `projects/botminter/invariants/checks/`:
 
 | Script | Invariant | What It Checks |
 |---|---|---|
-| `file-size-limit.sh` | ADR-0006 (directory modules) | `wc -l` on `.rs` files under source dirs. Fail if >300 non-test lines. Exclude `target/`, test fixtures. |
-| `test-path-isolation.sh` | `test-path-isolation` | `dirs::home_dir()` and `std::env::home_dir()` in `#[cfg(test)]` blocks without temp dir setup. |
-
-**Project-specific** (`projects/botminter/invariants/checks/`):
-
-| Script | Invariant | What It Checks |
-|---|---|---|
+| `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 non-test lines (soft threshold per ADR-0007's "~300" qualifier). Exclude `target/`, test fixtures. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
+| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/src/` and `crates/bm/tests/`. Flags usages in test code that lack corresponding `tempdir()` setup. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. |
 | `domain-layer-imports.sh` | ADR-0007 | Greps for `println!`, `eprintln!`, `use clap`, `use comfy_table`, `use dialoguer`, `use cliclack` in all dirs under `crates/bm/src/` except the command layer (`commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`). Uses directory exclusion — new domain modules are scanned automatically. |
-| `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` | Known profile name strings (`"scrum-compact"`, `"scrum"`) in `.rs` files. Excludes `tests/`, `test-fixtures/`, `profiles/`. |
+| `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` (partial) | Known profile name strings (`"scrum-compact"`, `"scrum"`) in `.rs` files. Excludes `tests/`, `test-fixtures/`, `profiles/`. **Caveat:** This check enforces the profile-name subset of the `no-hardcoded-profiles` invariant. The full invariant also prohibits hardcoded role names, status values, label names, and other profile-derived data — those remain enforced by agent judgment during code review, as they require semantic understanding of what constitutes "profile-derived data." |
 
 ### 3.3 Custom Linter Implementation Details
 
@@ -173,8 +166,8 @@ done
 exit $((violations > 0 ? 1 : 0))
 ```
 
-**False positive analysis:**
-- `eprintln!` in `#[cfg(test)]` blocks: test code may legitimately use `eprintln!` for debugging. The script excludes `#[cfg(test)]` blocks from violations.
+**Known limitations and false positives:**
+- `eprintln!` in `#[cfg(test)]` blocks: test code may legitimately use `eprintln!` for debugging. The flat `grep -rn` implementation has **no `#[cfg(test)]` block awareness** — it cannot distinguish test code from production code within the same file. Excluding test blocks from grep-based shell scripts is non-trivial (requires multi-pass processing to identify block line ranges). **Mitigation:** A `# check:ignore` inline comment suppresses the violation for that line. The implementation story should document the suppression syntax and add it to the check script contract.
 - String literals containing pattern words (e.g., `"eprintln! is prohibited"`): unlikely in domain modules; low false positive risk.
 
 ### 3.4 Known First-Run Violations
@@ -199,17 +192,17 @@ Per ADR-0007: replace with `tracing::warn!`/`tracing::info!` or return structure
 **`qe_verifier`** gains:
 > As part of verification, run the check runner. Violations block verification.
 
-### 3.6 CI Integration
+### 3.6 CI Integration (Deferred)
 
-CI runs the same runner on every PR targeting the project repo:
+CI integration is **explicitly deferred** to a follow-up story. The workspace dependency creates an architectural gap that must be resolved first:
 
-```bash
-bash team/coding-agent/skills/check-runner/run-checks.sh botminter
-```
+- The check runner lives at `team/coding-agent/skills/check-runner/run-checks.sh` (team repo)
+- CI runs against the project repo — the `team/` directory is a workspace artifact, not committed to the project repo
+- Making `team/` available in CI requires either: (a) a checkout step for the team repo, (b) a git submodule, or (c) relocating the runner and check scripts into the project repo
 
-Same exit codes, same output. The e2e test harness (`crates/bm/tests/e2e/`, `libtest-mimic`, `--features e2e`) validates runtime behavior; check scripts validate static properties. They complement each other.
+For this epic, checks run **agent-side only** — triggered by `dev_code_reviewer` and `qe_verifier` hats, which always have the full workspace available. This is sufficient to catch violations before merge. CI integration adds a safety net for direct pushes or manual PRs, but is not required for the core value proposition.
 
-Exploratory tests (per invariants `exploratory-test-scope`, `exploratory-test-user-journey`) remain agent-driven. Check scripts catch static violations before agents start testing.
+The e2e test harness (`crates/bm/tests/e2e/`, `libtest-mimic`, `--features e2e`) validates runtime behavior; check scripts validate static properties. They complement each other. Exploratory tests remain agent-driven.
 
 ### 3.7 CLAUDE.md Changes
 
@@ -227,7 +220,7 @@ The project CLAUDE.md (`projects/botminter/CLAUDE.md`) gains:
 - **Given** the existing 9 `eprintln!` violations, **when** `domain-layer-imports.sh` runs, **then** each is reported with file path, line numbers, and specific remediation.
 - **Given** a new `.sh` script is added to either checks directory, **when** the runner executes, **then** the new script is discovered and run automatically.
 - **Given** a check script has a syntax error (exit >1), **when** the runner executes it, **then** the crash is logged as a warning but does not block review.
-- **Given** the runner runs in CI on a PR, **when** a domain-layer violation exists, **then** CI fails with the same VIOLATION output agents see locally.
+- **Given** a `# check:ignore` comment is placed on a line with `eprintln!` in a domain module, **when** `domain-layer-imports.sh` runs, **then** that line is excluded from violations.
 
 ---
 
@@ -235,21 +228,20 @@ The project CLAUDE.md (`projects/botminter/CLAUDE.md`) gains:
 
 | Component | Change |
 |---|---|
-| `team/invariants/checks/` | New directory + 2 profile-generic scripts |
-| `projects/botminter/invariants/checks/` | New directory + 2 project-specific scripts |
+| `projects/botminter/invariants/checks/` | New directory + 4 project-specific scripts |
 | `team/coding-agent/skills/check-runner/` | New runner script |
 | `team/knowledge/check-script-contract.md` | New knowledge doc defining the contract |
 | `dev_code_reviewer` hat instructions | Add check-running step before review |
 | `qe_verifier` hat instructions | Add check-running step during verification |
 | `projects/botminter/CLAUDE.md` | Reference check runner and invariant checks |
 
-**No changes to:** Ralph Orchestrator, existing invariant markdown files, status graph, formation system, bridge system, daemon/web console, existing 11 ADRs, existing test infrastructure.
+**No changes to:** Ralph Orchestrator, `team/invariants/` directory (no profile-generic checks — deferred), existing invariant markdown files, status graph, formation system, bridge system, daemon/web console, existing 11 ADRs, existing test infrastructure.
 
 ---
 
 ## 6. Security Considerations
 
-Check scripts are read-only file analyzers. They scan code with `grep`/`find` — they do not modify files, make network requests, or alter git state. Scripts are version-controlled in the team repo (profile-generic) or project repo (project-specific).
+Check scripts are read-only file analyzers. They scan code with `grep`/`find` — they do not modify files, make network requests, or alter git state. Scripts are version-controlled in the project repo (`projects/botminter/invariants/checks/`). The runner is version-controlled in the team repo (`team/coding-agent/skills/check-runner/`).
 
 **Attack surface:** A malicious check script could only read files the agent already has access to. The runner does not execute arbitrary user input — it discovers and runs `.sh` files from known directories.
 
