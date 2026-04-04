@@ -12,7 +12,7 @@
 BotMinter's SDLC workflow produces no structured quality data. Three categories of raw data exist but go unconsumed:
 
 - **Board scan log** (`poll-log.txt`) — timestamped dispatch entries, but no cycle time extraction
-- **Loop history** (`.ralph/history.jsonl`) — loop session boundaries (`loop_started` with prompt, `loop_completed` with reason), but no session duration or completion-reason analysis
+- **Loop history** (`.ralph/history.jsonl`) — loop session boundaries (`loop_started` with prompt, `loop_completed` with reason), but no session duration, completion-reason analysis, or abandoned session detection (sessions that started but never completed)
 - **Cargo test output** — pass/fail exit codes, but no test count tracking or result archiving
 
 Without quality data:
@@ -107,7 +107,7 @@ Metric collection happens at natural workflow moments — not as a separate step
 | `dev_implementer` finishes build/test | build-test-collector | Build time, test pass/fail counts, test duration, clippy warnings |
 | `qe_verifier` runs verification | build-test-collector | Same, with verification-phase context |
 | Issue reaches terminal status (`done`) | workflow-collector | Time in each status, total cycle time, rejection count |
-| Ralph loop completes | agent-collector | Session count, session duration (from paired start/end timestamps), completion reasons |
+| Ralph loop completes | agent-collector | Session count (completed + abandoned), session duration, completion reasons |
 
 ### 2.4 Storage Model
 
@@ -184,9 +184,13 @@ test result: ok. 128 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; fi
 
 **What it does:**
 1. Reads the issue's comment timeline via `github-project` skill (query-issues --type single)
-2. Parses status transition comments (format: `Status: <from> → <to>` with ISO timestamps in comment headers)
-3. Computes: time in each status (seconds between transitions), total cycle time, rejection count (transitions that go backward)
-4. Appends a JSON line to `team/projects/<project>/metrics/workflow.jsonl`
+2. Parses status transition comments from two sources:
+   - **Manual transitions** (from `status-transition.sh`): format `Status: <from> → <to>`
+   - **Auto-advance transitions** (from board scanner): format `Auto-advance: <from> → <to>`
+   Both formats include ISO timestamps in the comment header (`### <emoji> <role> — <timestamp>`).
+3. Handles ambiguous from-status: `status-transition.sh` defaults `--from` to `(previous)` when not provided, producing comments like `Status: (previous) → dev:implement`. When `(previous)` appears as the from-status, the collector infers it from the preceding transition's to-status in chronological order. If no preceding transition exists (first comment), the hop's duration is recorded as `null` (unknown) rather than skipped — the entry still counts for rejection detection and status sequence reconstruction.
+4. Computes: time in each status (seconds between transitions, `null` for unknowable hops), total cycle time (sum of known durations), rejection count (transitions that go backward in the status graph)
+5. Appends a JSON line to `team/projects/<project>/metrics/workflow.jsonl`
 
 **Output format:**
 
@@ -197,12 +201,14 @@ test result: ok. 128 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; fi
   "issue": 42,
   "issue_type": "Task",
   "status_durations": {
+    "po:backlog": null,
     "qe:test-design": 1800,
     "dev:implement": 7200,
     "dev:code-review": 900,
     "qe:verify": 600
   },
-  "total_cycle_secs": 10500,
+  "total_cycle_secs": 10500,  
+  "unknown_duration_hops": 1,
   "rejections": 1,
   "rejection_statuses": ["dev:code-review"]
 }
@@ -229,12 +235,14 @@ Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair
 
 **What it does:**
 1. Reads `.ralph/history.jsonl` (entries since the previous collection timestamp, stored in `team/projects/<project>/metrics/.agent-cursor`)
-2. Pairs `loop_started` and `loop_completed` entries by adjacency (a `loop_completed` pairs with the most recent preceding `loop_started`)
-3. Computes session-level metrics from the paired entries:
-   - **session_count:** number of completed sessions in the window
-   - **avg_session_duration_secs:** average wall-clock time from `loop_started.ts` to `loop_completed.ts`
-   - **completion_reasons:** count of each reason (`completion_promise`, `max_iterations`, `consecutive_failures`)
-   - **failure_rate:** proportion of sessions ending in `consecutive_failures` over total completed sessions
+2. Pairs `loop_started` and `loop_completed` entries by adjacency (a `loop_completed` pairs with the most recent preceding `loop_started`). Detects **abandoned sessions**: when two consecutive `loop_started` entries appear without an intervening `loop_completed`, the first session is counted as abandoned (it was killed, crashed, or hung without clean termination)
+3. Computes session-level metrics:
+   - **completed_sessions:** number of sessions with a matching `loop_completed` entry
+   - **abandoned_sessions:** number of `loop_started` entries with no matching `loop_completed` (consecutive starts without intervening completion)
+   - **total_sessions:** `completed_sessions + abandoned_sessions`
+   - **avg_session_duration_secs:** average wall-clock time from `loop_started.ts` to `loop_completed.ts` (computed only from completed sessions — abandoned sessions have no end timestamp)
+   - **completion_reasons:** count of each reason (`completion_promise`, `max_iterations`, `consecutive_failures`) — applies only to completed sessions
+   - **failure_rate:** proportion of non-successful sessions over total sessions: `(consecutive_failures + abandoned_sessions) / total_sessions`. This counts both explicit failures (completed with `consecutive_failures`) and implicit failures (abandoned without clean termination)
 4. Appends a single JSON line to `team/projects/<project>/metrics/agent.jsonl`
 
 **Output format:**
@@ -245,14 +253,16 @@ Entries are **loop-session-level** — each `loop_started`/`loop_completed` pair
   "type": "agent",
   "window_start": "2026-03-28T00:00:00Z",
   "window_end": "2026-04-04T16:30:00Z",
-  "sessions": 15,
+  "completed_sessions": 6,
+  "abandoned_sessions": 23,
+  "total_sessions": 29,
   "avg_session_duration_secs": 3600,
   "completion_reasons": {
-    "completion_promise": 8,
-    "max_iterations": 5,
+    "completion_promise": 3,
+    "max_iterations": 1,
     "consecutive_failures": 2
   },
-  "failure_rate": 0.13
+  "failure_rate": 0.86
 }
 ```
 
@@ -281,8 +291,8 @@ Four hats receive instruction updates:
 
 | Hat | New Behavior |
 |-----|-------------|
-| `dev_implementer` | After build/test, call build-test-collector. Before starting, read last 3 build-test entries for the project to check for regressions (increasing build time, growing clippy warnings). |
-| `dev_code_reviewer` | Read build-test metrics for the story's branch. Flag if tests failed or clippy warnings increased versus the previous entry for this project. |
+| `dev_implementer` | After build/test, call build-test-collector. Before starting, read build-test entries filtered by issue number (`--issue` field) for this story to check for regressions across iterations (increasing build time, growing clippy warnings). If no entries exist for this issue yet (first build), read the last 3 project-wide entries as a baseline trend — but label them as cross-story context, not as regressions in this branch. |
+| `dev_code_reviewer` | Read build-test metrics filtered by the story's branch (`branch` field). Flag if tests failed or clippy warnings increased versus the previous entry for this branch. |
 | `qe_verifier` | After verification build/test, call build-test-collector. Compare test counts against the implementation-phase entry — flag if tests were removed or reduced. |
 | `arch_designer` | At the start of design work, read the metric summary (last 7 days) for project health context. Cycle time and rejection rate inform design complexity decisions. |
 
@@ -371,13 +381,19 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 
 - **Given** a story issue reaches `done` status, **when** the workflow collector runs, **then** a JSONL entry is appended to `workflow.jsonl` with the time spent in each status and the total cycle time.
 
+- **Given** an issue has both `Status:` comments (from status-transition.sh) and `Auto-advance:` comments (from board scanner), **when** the workflow collector parses the timeline, **then** both comment formats are recognized as status transitions and included in the status duration and cycle time calculations.
+
+- **Given** a status transition comment contains `(previous)` as the from-status, **when** the workflow collector processes it, **then** the from-status is inferred from the preceding transition's to-status. If no preceding transition exists, the duration for that hop is recorded as `null`.
+
 - **Given** `dev_implementer` starts working on a story, **when** the hat reads the last 3 build-test entries, **then** it can identify if build time or clippy warnings are trending upward and mention this in its approach.
 
 - **Given** `qe_verifier` runs verification, **when** test counts are compared against the implementation-phase entry, **then** a decrease in test count is flagged as a concern in the verification comment.
 
 - **Given** a `cw:write` issue for a quality summary report exists, **when** the `cw_writer` hat runs `summary.sh`, **then** a markdown report is written to `team/projects/<project>/knowledge/reports/quality-YYYY-MM-DD.md` with build health, workflow efficiency, and agent performance sections.
 
-- **Given** a Ralph loop session completes (LOOP_COMPLETE), **when** the agent-collector runs, **then** a JSONL entry is appended to `agent.jsonl` with session count, average session duration, completion reason distribution, and failure rate computed from paired `loop_started`/`loop_completed` entries in `history.jsonl`.
+- **Given** a Ralph loop session completes (LOOP_COMPLETE), **when** the agent-collector runs, **then** a JSONL entry is appended to `agent.jsonl` with `completed_sessions`, `abandoned_sessions`, `total_sessions`, average session duration (from completed sessions only), completion reason distribution, and `failure_rate` computed as `(consecutive_failures + abandoned_sessions) / total_sessions` from `loop_started`/`loop_completed` entries in `history.jsonl`.
+
+- **Given** `history.jsonl` contains consecutive `loop_started` entries without an intervening `loop_completed`, **when** the agent-collector processes the window, **then** the first of each consecutive pair is counted as an abandoned session and included in `abandoned_sessions` and the `failure_rate` numerator.
 
 - **Given** the metric summary script runs with a 7-day window, **when** data exists for all three metric types, **then** the output includes build health, workflow efficiency, and agent performance sections with trend indicators.
 
@@ -396,7 +412,7 @@ JSONL files are append-only. No automated retention policy at pre-alpha stage �
 | `dev_code_reviewer` hat instructions | Read build-test metrics during review |
 | `qe_verifier` hat instructions | Call build-test collector; compare against implementation-phase metrics |
 | `arch_designer` hat instructions | Read metric summary for project health context |
-| Board scanner (auto-advance) | Call workflow-collector during `po:merge` → `done` auto-advance; non-blocking on failure |
+| Board scanner (auto-advance) | Call workflow-collector during `po:merge` → `done` auto-advance; non-blocking on failure. Note: the auto-advance comment itself (`Auto-advance: po:merge → done`) is written AFTER the collector runs, so it will be captured in the NEXT issue's collection window if that issue shares the same timeline — but since workflow metrics are per-issue, this is a non-issue |
 | `cw_writer` hat instructions | Run `summary.sh` when handling quality summary report issues |
 
 **No changes to:** Ralph Orchestrator, BotMinter CLI (`bm`), agent CLI (`bm-agent`), daemon/web console, existing status graph, existing invariant files, existing test infrastructure, existing 11 ADRs, `.planning/` directory, `specs/` directory, check script system (#114), plan artifact system (#116).
