@@ -121,8 +121,8 @@ All scripts live in `projects/botminter/invariants/checks/`:
 
 | Script | Invariant | What It Checks |
 |---|---|---|
-| `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 total lines (soft threshold per ADR-0007's "~300" qualifier). Counts all lines — no `#[cfg(test)]` block exclusion, since `wc -l` cannot distinguish test code from production code and ADR-0007 states the ~300 limit without a test-exclusion caveat. Excludes `target/`, test fixtures. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
-| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/tests/` **only**. Flags any usage in test code — test files should use `tempdir()` or equivalent isolation, never the real home directory. Production code (`crates/bm/src/`) is **excluded**: `dirs::home_dir()` is used legitimately there (e.g., `config/mod.rs` for config resolution, `formation/lima.rs` for VM paths). The check does not attempt semantic tempdir-pairing analysis — it simply reports `home_dir` calls in test files as violations. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. **Known invariant gap:** The `test-path-isolation` invariant also covers `#[cfg(test)]` modules in `crates/bm/src/` (unit tests), but this check does not scan `src/` — doing so would require distinguishing `#[cfg(test)]` blocks from production code, which grep cannot do. Legitimate production `dirs::home_dir()` calls: config/mod.rs:95,179,188; formation/lima.rs:286; commands/debug.rs:268. Note: formation/lima.rs:462 is **test code** — it is inside `#[cfg(test)] mod tests` (starting at line 457), not production code. Currently 1 violation exists in this gap (formation/lima.rs:462). |
+| `file-size-limit.sh` | ADR-0007 (domain-command layering, line 143: "No sub-file exceeds ~300 lines") | `wc -l` on `.rs` files under `crates/bm/src/`. Warn if >300 total lines (soft threshold per ADR-0007's "~300" qualifier). Counts all lines — no `#[cfg(test)]` block exclusion, since `wc -l` cannot distinguish test code from production code and ADR-0007 states the ~300 limit without a test-exclusion caveat. Excludes `target/`, test fixtures. Scans **all** `.rs` files including `commands/` — ADR-0007 applies the ~300 line rule to domain sub-files and a stricter ~100 line rule to command files ("Exceed ~100 lines of non-test code — thickness signals domain logic that has not been extracted"), so the 300-line threshold is a lenient heuristic for both layers. Note: ADR-0007 applies the ~300 line rule to sub-files within directory modules, not to all `.rs` files — the check uses this as a project-wide heuristic. |
+| `test-path-isolation.sh` | `test-path-isolation` (project invariant) | Greps for `dirs::home_dir()` and `std::env::home_dir()` in `.rs` files under `crates/bm/tests/` **only**. Flags any usage in test code — test files should use `tempdir()` or equivalent isolation, never the real home directory. Production code (`crates/bm/src/`) is **excluded**: `dirs::home_dir()` is used legitimately there (e.g., `config/mod.rs` for config resolution, `formation/lima.rs` for VM paths). The check does not attempt semantic tempdir-pairing analysis — it simply reports `home_dir` calls in test files as violations. This check is BotMinter-specific: the invariant references `~/.botminter` paths and `bm_cmd()` APIs. **Known false positive:** `integration.rs:6` contains `//! config via dirs::home_dir() are invoked...` — a doc comment (`//!`), not a function call. Grep cannot distinguish doc comments from actual code. This will be reported as a violation on first run. Mitigation: add `// check:ignore` (or accept as a known false positive and suppress in the baseline). **Known invariant gap:** The `test-path-isolation` invariant also covers `#[cfg(test)]` modules in `crates/bm/src/` (unit tests), but this check does not scan `src/` — doing so would require distinguishing `#[cfg(test)]` blocks from production code, which grep cannot do. Legitimate production `dirs::home_dir()` calls: config/mod.rs:95,179,188; formation/lima.rs:286; commands/debug.rs:268. Note: formation/lima.rs:462 is **test code** — it is inside `#[cfg(test)] mod tests` (starting at line 457), not production code. Currently 1 violation exists in this gap (formation/lima.rs:462). |
 | `domain-layer-imports.sh` | ADR-0007 | Greps for `println!`, `eprintln!`, `use clap`, `use comfy_table`, `use dialoguer`, `use cliclack` in all modules under `crates/bm/src/` except the command layer (`commands/`, `main.rs`, `cli.rs`, `agent_main.rs`, `agent_cli.rs`). Scans both directory modules (`$DOMAIN_ROOT/*/`) and standalone domain `.rs` files (`$DOMAIN_ROOT/*.rs`, excluding command-layer files). New domain modules — whether directories or standalone files — are scanned automatically. |
 | `no-hardcoded-profiles.sh` | `no-hardcoded-profiles` (partial) | Scans for lines containing profile name strings (`scrum-compact`, `scrum`) in `.rs` files under `crates/bm/src/`. Excludes `commands/` only. Matches include string literals (`"scrum"`), path references (`profiles/scrum/`), function names (`fn rh_scrum_has_views`), and assertion messages — any line containing the profile name is a hardcoded reference. **Baseline:** 74 existing occurrences — all in `#[cfg(test)]` blocks (web/files.rs:15, profile/mod.rs:14, profile/agent.rs:12, profile/extraction.rs:11, config/mod.rs:7, web/teams.rs:4, web/members.rs:3, git/manifest_flow.rs:3, team.rs:1, profile/member.rs:1, formation/init.rs:1, bridge/manifest.rs:1, agent_tags/mod.rs:1). These are test fixtures, function names, and path strings that hardcode profile names, violating the invariant's intent. **`#[cfg(test)]` exclusion policy:** grep cannot distinguish `#[cfg(test)]` blocks from production code, so all 74 will be reported as violations on first run. Like `domain-layer-imports.sh`, the `// check:ignore` suppression mechanism applies, but the right fix is to make these tests use dynamic profile discovery per the invariant. **Caveat:** This check enforces the profile-name subset of the `no-hardcoded-profiles` invariant. The full invariant also prohibits hardcoded role names, status values, label names, and other profile-derived data — those remain enforced by agent judgment during code review, as they require semantic understanding of what constitutes "profile-derived data." |
 
@@ -193,6 +193,68 @@ exit $((violations > 0 ? 1 : 0))
 - String literals containing pattern words (e.g., `"eprintln! is prohibited"`): unlikely in domain modules; low false positive risk.
 
 ### 3.4 Known First-Run Violations
+
+`file-size-limit.sh` will flag 47 existing files exceeding 300 lines (40 domain + 7 command-layer):
+
+| Layer | File | Lines |
+|---|---|---|
+| domain | `profile/extraction.rs` | 1508 |
+| domain | `workspace/repo.rs` | 1287 |
+| domain | `web/files.rs` | 1102 |
+| domain | `profile/mod.rs` | 1003 |
+| domain | `daemon/api.rs` | 997 |
+| domain | `brain/bridge_adapter.rs` | 985 |
+| command | `commands/init.rs` | 939 |
+| command | `cli.rs` | 786 |
+| domain | `formation/mod.rs` | 729 |
+| domain | `brain/event_watcher.rs` | 696 |
+| domain | `chat/mod.rs` | 685 |
+| domain | `formation/lima.rs` | 675 |
+| domain | `profile/team_repo.rs` | 670 |
+| domain | `agent_tags/mod.rs` | 670 |
+| domain | `git/github.rs` | 656 |
+| domain | `git/manifest_flow.rs` | 646 |
+| domain | `workspace/util.rs` | 582 |
+| command | `commands/completions.rs` | 575 |
+| domain | `web/members.rs` | 563 |
+| domain | `workspace/sync.rs` | 557 |
+| domain | `web/overview.rs` | 548 |
+| domain | `formation/start_members.rs` | 547 |
+| domain | `bridge/manifest.rs` | 542 |
+| domain | `acp/client.rs` | 522 |
+| domain | `formation/local/linux/mod.rs` | 507 |
+| domain | `formation/local/linux/credential.rs` | 490 |
+| domain | `config/mod.rs` | 482 |
+| domain | `bridge/credential.rs` | 477 |
+| domain | `bridge/mod.rs` | 475 |
+| domain | `brain/inbox.rs` | 435 |
+| domain | `profile/agent.rs` | 429 |
+| domain | `workspace/team_sync.rs` | 417 |
+| command | `commands/debug.rs` | 412 |
+| domain | `brain/multiplexer.rs` | 405 |
+| domain | `daemon/client.rs` | 403 |
+| domain | `profile/embedded.rs` | 389 |
+| domain | `brain/heartbeat.rs` | 386 |
+| domain | `daemon/run.rs` | 384 |
+| domain | `web/process.rs` | 379 |
+| domain | `state/mod.rs` | 375 |
+| domain | `profile/member.rs` | 364 |
+| command | `commands/brain_run.rs` | 338 |
+| domain | `team.rs` | 335 |
+| command | `commands/profiles_init.rs` | 331 |
+| domain | `formation/stop_members.rs` | 312 |
+| command | `main.rs` | 307 |
+| domain | `daemon/process.rs` | 301 |
+
+All paths relative to `crates/bm/src/`. Largest: `profile/extraction.rs` (1508 lines, 5x the threshold). `wc -l` counts all lines including `#[cfg(test)]` blocks — many of these files have substantial test code that inflates the count. Per ADR-0007, the ~300 line limit is a soft threshold ("~300" qualifier), so these are reported as violations but represent existing technical debt, not regressions. The check's value is preventing new files from exceeding the threshold and detecting growth in existing files.
+
+`test-path-isolation.sh` will flag 1 false positive in `crates/bm/tests/`:
+
+| File | Line | What |
+|---|---|---|
+| `integration.rs` | 6 | `//! config via dirs::home_dir() are invoked...` — doc comment (`//!`), not a function call |
+
+This is a grep limitation: the pattern `dirs::home_dir()` matches inside doc comments. No actual `dirs::home_dir()` calls exist in test files under `crates/bm/tests/`.
 
 `domain-layer-imports.sh` will flag 9 existing `eprintln!` violations:
 
