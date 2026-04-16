@@ -65,7 +65,7 @@ fi
 
 # Fallback: fetch from API if not in cache
 if [ -z "$ITEM_ID" ] || [ "$ITEM_ID" = "null" ]; then
-  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json \
+  ITEM_ID=$(gh project item-list "$PROJECT_NUM" --owner "$OWNER" --format json --limit 1000 \
     | jq -r ".items[] | select(.content.number == $ISSUE_NUM) | .id")
 fi
 
