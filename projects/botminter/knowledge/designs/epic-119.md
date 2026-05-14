@@ -3,9 +3,9 @@ type: design
 status: draft
 parent: "106"
 epic: "119"
-revision: 2
+revision: 3
 created: 2026-04-04
-updated: 2026-04-04
+updated: 2026-05-14
 author: bob (superman)
 depends_on:
   - "114"
@@ -153,7 +153,7 @@ team/projects/<project>/            Issue metadata ──┐
 Three new components, all consumed by the `po_reviewer` hat:
 
 1. **Trust state file** — YAML file tracking the current autonomy tier, bootstrap window, and history. Human-editable. The single source of truth for the current tier.
-2. **Risk classifier** — Shell script that assesses an issue's risk level based on observable signals.
+2. **Risk classifier** — Shell script that reads structured `risk_metadata` from design docs and issue metadata to assess an issue's risk level.
 3. **Gate policy** — Logic in the `po_reviewer` hat instructions that combines tier + risk to decide behavior.
 
 No new hats, no new statuses, no new events. The `po_reviewer` hat gains conditional logic based on the trust state and risk assessment.
@@ -171,7 +171,8 @@ No new hats, no new statuses, no new events. The `po_reviewer` hat gains conditi
 tier: supervised          # supervised | monitored | autonomous
 promoted_at: null         # ISO date of last tier promotion (null if never promoted)
 promoted_by: human        # who promoted: always "human" (promotions are human-initiated)
-demotion_cooldown: 0      # cycles remaining before re-evaluation after demotion
+demoted_at: null          # (rev 3) ISO date of last demotion (null if never demoted)
+demotion_cooldown_hours: 0  # (rev 3) hours of cooldown after demotion (0 = no cooldown)
 
 # Bootstrap window (rev 2)
 # When tier is promoted to monitored, bootstrap_remaining is set to 3.
@@ -208,7 +209,25 @@ history:
 **Who reads:**
 - `po_reviewer` — reads tier, bootstrap_remaining, and stats at the start of each gate check
 
-### 3.2 Risk Classifier
+#### 3.1.1 Write Protocol (rev 3)
+
+Trust-state.yml updates use direct commits to main, the same mechanism used for other team repo files (knowledge docs, invariants, etc.).
+
+**Procedure:**
+1. The `po_reviewer` pulls latest `team/` (already happens at scan start)
+2. Reads and modifies `trust-state.yml` in memory
+3. Writes the updated file
+4. Commits with message format: `chore(autonomy): update trust-state for #<issue> (<event>)` — e.g., `chore(autonomy): update trust-state for #42 (auto_advance)`, `chore(autonomy): update trust-state for #42 (demotion)`
+5. Pushes to main
+
+**Concurrency:**
+- The board scanner processes one event at a time (stated in Section 2.2 and 5). Within a single member, concurrent writes to trust-state.yml do not occur.
+- Multi-member concurrent writes are out of scope. The current three-member model has only one member (`engineer`) that writes trust-state.yml. If future profiles add multiple writer members, a locking mechanism would be needed — but that is not this design's concern.
+
+**Batching:**
+- When a single scan cycle processes multiple gate events (e.g., several issues at `po:design-review` dispatched sequentially), the `po_reviewer` batches stats updates. All trust-state.yml changes from one scan cycle are collected into a single commit: `chore(autonomy): update trust-state batch (<N> events)`. This avoids N sequential commits for N gate events within one cycle.
+
+### 3.2 Risk Classifier (rev 3)
 
 **Script:** `team/coding-agent/skills/autonomy/classify-risk.sh`
 
@@ -224,7 +243,7 @@ history:
     "gate": "po:design-review",
     "scope_files": 3,
     "new_dependencies": false,
-    "cross_module": false,
+    "cross_module_changes": [],
     "has_security_section": true,
     "check_scripts_pass": true,
     "prior_rejections_at_gate": 0,
@@ -235,25 +254,51 @@ history:
 }
 ```
 
+#### Design Doc Risk Metadata Block (rev 3)
+
+Instead of parsing prose from design docs to extract scope and dependency signals, design docs include a **required YAML metadata section** that provides structured risk inputs. This block is added to design docs in addition to the existing YAML frontmatter:
+
+```yaml
+# At the end of the YAML frontmatter, or as a dedicated section in the design doc body:
+risk_metadata:
+  files_affected:
+    - "crates/bm/src/autonomy/"
+    - "crates/bm/src/agent_main.rs"
+    - "team/projects/botminter/autonomy/trust-state.yml"
+  new_dependencies: false
+  cross_module_changes: []          # list of [module_a, module_b] pairs
+  security_concerns: []             # list of strings; empty = no concerns
+```
+
+The `arch_designer` hat populates this block when producing the design doc. The `lead_reviewer` hat validates that the metadata accurately reflects the design content. This eliminates the need for the classifier to parse prose and produces deterministic signal extraction.
+
+**Signal extraction:**
+- `files_affected` — the classifier counts entries to determine scope (<=5 = LOW, 6-15 = MEDIUM, >15 = HIGH)
+- `new_dependencies` — read directly (false = LOW, true = HIGH)
+- `cross_module_changes` — read directly (empty = LOW, single pair = MEDIUM, multiple or circular = HIGH)
+- `security_concerns` — read directly (empty = LOW, non-empty with mitigations in the security section = MEDIUM, non-empty without mitigations = HIGH)
+
+**Fallback:** If a design doc lacks `risk_metadata` (pre-existing docs, docs from before this convention), the classifier falls back to conservative defaults: `scope_files = 16` (HIGH), `new_dependencies = true` (HIGH). This incentivizes authors to include the metadata.
+
 **Risk classification rules:**
 
 | Signal | LOW | MEDIUM | HIGH |
 |--------|-----|--------|------|
-| Issue type at gate | `po:accept` for docs-only epic | Standard epic/story | — |
+| Issue type at gate | `po:accept` for docs-only epic | Standard epic/story | -- |
 | Prior rejections at this gate (see 3.2.1) | 0 | 1 | >=2 |
-| Design scope (files listed in impact section) | <=5 files | 6-15 files | >15 files or "No changes to" lists fewer exclusions |
-| New dependencies introduced | No | — | Yes |
-| Cross-module changes | No | Single direction | Bidirectional or circular |
-| Check scripts (if #114 is deployed) | All pass | — | Any violation |
+| Design scope (`risk_metadata.files_affected` count) | <=5 files | 6-15 files | >15 files |
+| New dependencies (`risk_metadata.new_dependencies`) | false | -- | true |
+| Cross-module changes (`risk_metadata.cross_module_changes`) | Empty | Single pair | Multiple pairs or circular |
+| Check scripts (if #114 is deployed) | All pass | -- | Any violation |
 | Pattern novelty (see 3.2.2) | Known (>=3 prior successes) | Variant (1-2 prior) | First time (0 prior) |
-| Security section flags concerns | No concerns | Mitigated concerns | Unmitigated or missing |
+| Security concerns (`risk_metadata.security_concerns`) | Empty | Non-empty with mitigations | Non-empty without mitigations |
 
 **Composite rule:**
 - **HIGH:** Any signal is HIGH
-- **LOW:** No signals are HIGH AND no signals are MEDIUM — except during bootstrap (see 3.2.2), where pattern_novelty is excluded from this check
+- **LOW:** No signals are HIGH AND no signals are MEDIUM -- except during bootstrap (see 3.2.2), where pattern_novelty is excluded from this check
 - **MEDIUM:** Everything else
 
-The classifier reads the issue body, comments, and related design doc to extract signals. It uses the `github-project` skill to query the issue. If `run-checks.sh` exists (from #114), it runs it and includes the result. If metrics are available (from #117), it reads rejection rate for the project.
+The classifier reads the design doc's `risk_metadata` block for scope/dependency/security signals, queries the issue via the `github-project` skill for type and gate, and checks issue comments for prior rejections. If `run-checks.sh` exists (from #114), it runs it and includes the result.
 
 #### 3.2.1 Prior Rejections Scope (rev 2)
 
@@ -271,6 +316,8 @@ Pattern novelty creates a bootstrapping problem: a freshly-promoted monitored ti
 
 **Solution: Bootstrap window.** When the tier is promoted to monitored, `bootstrap_remaining` is set to 3.
 
+> **Why 3? (rev 3)** 3 is chosen as the minimum that provides meaningful signal -- a single auto-advance could be coincidence; 3 across different issues establishes a pattern of reliable auto-advance behavior. It keeps the bootstrap period short (typically 3 gate events, which may span hours to days depending on issue velocity) while still accumulating enough history for the pattern novelty classifier to have data points. The value is configurable via `trust-state.yml` (`bootstrap_remaining` field) if teams find a different number works better for their workflow.
+
 During the bootstrap window (`bootstrap_remaining > 0`):
 - Pattern novelty is **still evaluated** and **still reported** in the risk assessment output (with `"pattern_novelty_excluded": true`)
 - Pattern novelty is **excluded from the composite rule** — it does not contribute to the LOW/MEDIUM/HIGH classification
@@ -286,7 +333,11 @@ After bootstrap (`bootstrap_remaining == 0`):
 
 **Pattern novelty detection:**
 
-The classifier checks `team/projects/<project>/autonomy/trust-state.yml` history for previous auto-advances at the same gate for issues with similar characteristics (same issue type, similar scope). If >=3 prior successful auto-advances exist for similar issues, the pattern is "known". If 1-2 exist, "variant". If 0, "first_time".
+> **Definition: "Similar issues" (rev 3)**
+>
+> Two issues are considered "similar" for pattern novelty purposes if they share the same `(gate, issue_type, project_label)` tuple. For example, two Epic issues at `po:design-review` with `project/botminter` are similar regardless of their content, scope, or complexity. This is intentionally coarse-grained -- the classifier does not attempt fine-grained content similarity (e.g., comparing design doc topics or affected modules). The coarse definition keeps the classifier deterministic and avoids NLP-based similarity which would be fragile and hard to audit. The `project_label` dimension exists to prevent cross-project pattern accumulation if multi-project support is added later.
+
+The classifier checks `team/projects/<project>/autonomy/trust-state.yml` history for previous auto-advances at the same gate for issues matching the same `(gate, issue_type, project_label)` tuple. It also cross-references issue labels from the `github-project` skill. If >=3 prior successful auto-advances exist for matching issues, the pattern is "known". If 1-2 exist, "variant". If 0, "first_time".
 
 ### 3.3 Gate Policy in `po_reviewer`
 
@@ -397,6 +448,8 @@ The reversal window is configurable via `trust-state.yml` field `reversal_window
 
 **Why `next_gate` is the default:** The fixed 48-hour window (rev 1) was unjustified — no data supports that duration, and it expires before the human may even look at the issue (weekends, vacations). The `next_gate` semantic is self-adjusting: fast pipelines have short windows, slow ones have long windows, and the human always gets at least one opportunity to intervene at each stage. The time-based option exists as an override for teams that prefer explicit deadlines.
 
+> **Note (rev 3): Bug plan-review reversal window.** For issue types with no subsequent human gate after `po:plan-review` (e.g., complex bugs -- their workflow goes `po:plan-review` -> `bug:breakdown` -> `bug:in-progress` -> `qe:verify` -> `done` with no further `human:*` gate), the `next_gate` reversal window cannot resolve to a downstream human gate. In this case, the reversal window falls back to the time-based default (168 hours / 7 days), the same fallback used for `po:accept`. This ensures the human always has a reasonable window to reverse, even when the workflow has no subsequent human checkpoint.
+
 #### 3.5.2 Reversal Scan Procedure
 
 1. Read auto-advance entries from trust-state history
@@ -455,27 +508,27 @@ When an auto-advance is reversed, downstream work that was built on the auto-adv
 
 ### 3.6 Demotion and Circuit Breakers
 
-**Automated demotion triggers:**
+**Automated demotion triggers (rev 3 -- cooldown in hours):**
 
 | Trigger | Action |
 |---------|--------|
-| Any rejection at monitored tier (human rejects an issue that was NOT auto-advanced) | Demote to supervised. Reset stats. Set `demotion_cooldown: 10` cycles. |
-| Any auto-advance reversal at monitored tier | Demote to supervised. Reset stats. Set `demotion_cooldown: 20` cycles. |
-| Any auto-advance reversal at autonomous tier | Demote to monitored (not all the way to supervised). Set `demotion_cooldown: 10` cycles. |
-| 2 auto-advance reversals within 7 days at autonomous tier | Demote to supervised. Reset stats. Set `demotion_cooldown: 30` cycles. |
+| Any rejection at monitored tier (human rejects an issue that was NOT auto-advanced) | Demote to supervised. Reset stats. Set `demotion_cooldown_hours: 24`. |
+| Any auto-advance reversal at monitored tier | Demote to supervised. Reset stats. Set `demotion_cooldown_hours: 48`. |
+| Any auto-advance reversal at autonomous tier | Demote to monitored (not all the way to supervised). Set `demotion_cooldown_hours: 24`. |
+| 2 auto-advance reversals within 7 days at autonomous tier | Demote to supervised. Reset stats. Set `demotion_cooldown_hours: 48`. |
 
 **Demotion procedure:**
-1. Update trust-state.yml: set new tier, reset stats, reset `bootstrap_remaining` to 0, set cooldown, append history
+1. Update trust-state.yml: set new tier, reset stats, reset `bootstrap_remaining` to 0, set `demotion_cooldown_hours` and record `demoted_at` timestamp, append history
 2. Post comment on the triggering issue documenting the demotion
-3. Send Telegram notification: "Autonomy demoted from <old> to <new> for project <project>. Reason: <trigger>. Cooldown: N cycles."
+3. Send Telegram notification: "Autonomy demoted from <old> to <new> for project <project>. Reason: <trigger>. Cooldown: N hours."
 
-**Demotion cooldown:** After demotion, the `demotion_cooldown` counter decrements each scan cycle. During cooldown, the system stays at the demoted tier regardless of stats. This prevents oscillation.
+**Demotion cooldown (rev 3):** After demotion, the `po_reviewer` checks whether `demoted_at + demotion_cooldown_hours > now`. During cooldown, the system stays at the demoted tier regardless of stats. This prevents oscillation. Using wall-clock hours instead of scan cycles makes the cooldown deterministic and independent of scan frequency -- a 24-hour cooldown means 24 hours regardless of whether the scanner runs every 5 minutes or every hour.
 
 **Promotion is always human-initiated.** The system never self-promotes. The human edits `trust-state.yml` to change the tier and sets `bootstrap_remaining: 3` (for monitored promotion). This is a deliberate asymmetry: demotion is automated (safety), promotion is manual (trust).
 
 ### 3.7 Promotion Guidance
 
-While promotion is human-initiated, the system surfaces readiness signals. When the `po_reviewer` hat finds the system at supervised tier with `demotion_cooldown: 0` and `stats.approvals >= 5` and `stats.rejections == 0`, it adds a one-time comment:
+While promotion is human-initiated, the system surfaces readiness signals. When the `po_reviewer` hat finds the system at supervised tier with no active demotion cooldown (i.e., `demoted_at` is null or `demoted_at + demotion_cooldown_hours` has passed) and `stats.approvals >= 5` and `stats.rejections == 0`, it adds a one-time comment:
 
 ```markdown
 ### 📝 po — <ISO-timestamp>
@@ -501,7 +554,8 @@ This comment is added at most once per supervised period (tracked via a flag in 
 tier: string              # "supervised" | "monitored" | "autonomous"
 promoted_at: string|null  # ISO 8601 UTC timestamp or null
 promoted_by: string       # always "human"
-demotion_cooldown: int    # scan cycles remaining (0 = no cooldown)
+demoted_at: string|null   # (rev 3) ISO 8601 UTC timestamp of last demotion or null
+demotion_cooldown_hours: int  # (rev 3) hours of cooldown after demotion (0 = no cooldown)
 bootstrap_remaining: int  # (rev 2) bootstrap auto-advances remaining (0 = complete)
 reversal_window: string|int  # (rev 2) "next_gate" or integer hours
 
@@ -576,7 +630,7 @@ team/projects/<project>/
 
 - **Race condition on trust-state.yml:** The `po_reviewer` hat processes one gate per cycle (board scanner dispatches one event at a time). No concurrent writes to trust-state.yml. If the team repo has merge conflicts on this file, the latest `tier` value wins (take the more conservative tier if ambiguous).
 
-- **Human edits trust-state.yml incorrectly:** If `tier` is set to an invalid value, treat as `supervised`. If `stats` are inconsistent, the hat resets them on the next update. If `bootstrap_remaining` is missing or negative, treat as 0 (bootstrap complete). If `reversal_window` is invalid, default to `next_gate`. Trust-state is a coordination artifact, not a security boundary — the human can always fix it.
+- **Human edits trust-state.yml incorrectly:** If `tier` is set to an invalid value, treat as `supervised`. If `stats` are inconsistent, the hat resets them on the next update. If `bootstrap_remaining` is missing or negative, treat as 0 (bootstrap complete). If `reversal_window` is invalid, default to `next_gate`. If `demotion_cooldown_hours` is missing or negative, treat as 0 (no cooldown). If `demoted_at` is missing or invalid, treat cooldown as expired. Trust-state is a coordination artifact, not a security boundary — the human can always fix it.
 
 - **Telegram notification failure:** Non-blocking. If RObot is unavailable, the auto-advance still proceeds. The GitHub comment is the authoritative record; Telegram is convenience.
 
@@ -604,9 +658,9 @@ team/projects/<project>/
 
 - **Given** a reversal that affects 3 downstream stories (one at `qe:test-design`, one at `dev:implement` not started, one at `dev:implement` with work in progress), **when** the cascade runs, **then** the first two are closed as "not planned" and the third receives a warning comment requiring human decision.
 
-- **Given** any auto-advance reversal at `monitored` tier, **when** the reversal is processed, **then** the tier is demoted to `supervised`, stats are reset, `demotion_cooldown` is set to 20, and a demotion comment is posted.
+- **Given** any auto-advance reversal at `monitored` tier, **when** the reversal is processed, **then** the tier is demoted to `supervised`, stats are reset, `demotion_cooldown_hours` is set to 48, `demoted_at` is set to the current timestamp, and a demotion comment is posted.
 
-- **Given** a project at `supervised` tier with 5 approvals and 0 rejections and `demotion_cooldown == 0`, **when** the `po_reviewer` completes a gate check, **then** a one-time readiness notification comment is posted suggesting promotion to `monitored`.
+- **Given** a project at `supervised` tier with 5 approvals and 0 rejections and no active demotion cooldown, **when** the `po_reviewer` completes a gate check, **then** a one-time readiness notification comment is posted suggesting promotion to `monitored`.
 
 - **Given** the risk classifier script fails, **when** `po_reviewer` catches the error, **then** it falls back to supervised behavior and logs a warning — no auto-advance occurs.
 
@@ -621,7 +675,7 @@ team/projects/<project>/
 | Component | Change |
 |-----------|--------|
 | `po_reviewer` hat instructions (ralph.yml) | Gate policy decision block before human comment check. Auto-advance procedure with bootstrap logic. Post-advance reversal scan with cascade mechanism. Demotion logic. Promotion readiness notification. |
-| `team/coding-agent/skills/autonomy/` | New directory with `classify-risk.sh` |
+| `team/coding-agent/skills/autonomy/` | New directory with `classify-risk.sh` (reads structured `risk_metadata` from design docs) |
 | `team/projects/<project>/autonomy/` | New directory with `trust-state.yml` (created on first use) |
 | `team/knowledge/` | New `graduated-autonomy.md` knowledge document describing the tier model |
 | Board scanner documentation | Updated to note that `po.review` dispatch behavior depends on autonomy tier |
@@ -670,3 +724,18 @@ This revision addresses 5 findings from the lead design review:
 | 3 | 48-hour reversal window unjustified | Significant | Replaced with configurable `reversal_window` (Section 3.5.1): default `next_gate` (until issue reaches next human gate). Time-based option available as override. |
 | 4 | Prior rejections scope ambiguous | Significant | Defined explicitly (Section 3.2.1): per-gate, per-issue count from comments. Reversals tracked separately. Renamed field to `prior_rejections_at_gate`. |
 | 5 | po:accept reversal needs issue reopening | Significant | Added explicit reopen step in reversal procedure (Section 3.5.2 step b). Error handling for reopen failure added (Section 5). |
+
+---
+
+## Appendix: Revision 3 Changes
+
+This revision addresses 6 findings from the lead design review:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | Trust-state.yml commit mechanism unspecified | Critical | Added Section 3.1.1 (Write Protocol): direct commits to main, commit message format, batching for multiple events in a single scan cycle. |
+| 2 | Risk classifier relies on prose parsing | Critical | Replaced prose-parsing approach with structured `risk_metadata` YAML block in design docs (Section 3.2). Arch_designer populates, lead_reviewer validates. Fallback to conservative defaults for docs without metadata. Pattern novelty uses trust-state history + issue labels, not NLP. |
+| 3 | Demotion cooldown in cycles is non-deterministic | Significant | Changed from `demotion_cooldown` (scan cycles) to `demotion_cooldown_hours` (wall-clock hours) throughout (Sections 3.1, 3.6, 4.1). Added `demoted_at` timestamp. 24h after rejection, 48h after reversal. |
+| 4 | Pattern novelty "similar" undefined | Significant | Added definition box in Section 3.2.2: similarity is the `(gate, issue_type, project_label)` tuple. Intentionally coarse-grained to keep the classifier deterministic. |
+| 5 | Bug plan-review reversal window unaddressed | Acknowledge | Added note in Section 3.5.1: issue types with no subsequent human gate after `po:plan-review` fall back to 168-hour time-based default. |
+| 6 | Bootstrap window value (3) unjustified | Acknowledge | Added reasoning in Section 3.2.2: 3 is the minimum for meaningful signal (single could be coincidence), value is configurable. |

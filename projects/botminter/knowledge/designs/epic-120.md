@@ -3,9 +3,9 @@ type: design
 status: draft
 parent: "106"
 epic: "120"
-revision: 1
+revision: 2
 created: 2026-04-04
-updated: 2026-04-04
+updated: 2026-05-14
 author: bob (superman)
 depends_on: []
 ---
@@ -190,9 +190,15 @@ Produces a structured JSON snapshot of the project for agent context injection.
 }
 ```
 
-**Implementation:** Reads `Cargo.toml` for version/features, walks `crates/bm/src/` for module discovery, reads `Justfile` for build commands, lists `.planning/adrs/` and `invariants/` directories. All data is derived from the current filesystem state — no caching, no stale data.
+**Implementation:** Reads `Cargo.toml` for version/features, walks `crates/bm/src/` for module discovery, reads `Justfile` for build commands, lists `.planning/adrs/` and `invariants/` directories. All data is derived from the current filesystem state -- no caching, no stale data.
+
+> **Module discovery definition (rev 2):** A module is defined as a first-level subdirectory of `crates/bm/src/` that contains a `mod.rs` file (per ADR-0006 directory modules convention). Nested directories within a module are NOT counted as separate modules. For example, `crates/bm/src/bridge/` is a module (contains `mod.rs`), but `crates/bm/src/bridge/github/` is NOT a separate module -- it is an internal directory of the `bridge` module.
 
 **Working directory:** Must be run from the project root (same as `bm-agent inbox`).
+
+> **Note (rev 2): Project describe generality.** `bm-agent project describe` is BotMinter-specific in this iteration -- it reads `Cargo.toml` for version/features, walks the Rust crate structure for modules, and follows Rust conventions for test tier discovery. For non-Rust projects, the command returns a minimal JSON with `{"name": "<project>", "language": "unknown", "error": "No project descriptor found"}`. Future iterations can add language-specific descriptors via a plugin pattern (e.g., a `project-descriptor.sh` script in the project root that overrides the default discovery logic).
+
+**Flag:** `bm-agent project describe [--project <name>]` -- the `--project` flag allows specifying which project to describe when the working directory contains multiple projects. Defaults to auto-detection from `Cargo.toml` in the current directory.
 
 #### `bm-agent env check`
 
@@ -271,6 +277,8 @@ Wraps test execution and produces a structured JSON summary of results.
 
 **Implementation:** Runs `cargo test` with `--format json` on nightly, or parses the stable text output with regex patterns (Rust test output format is well-defined: `test <name> ... ok/FAILED`, summary line `test result: <status>. <pass> passed; <fail> failed; <ignored> ignored`). Failure details are extracted from the `---- <test_name> stdout ----` blocks.
 
+> **Note (rev 2): JSON format stability.** The JSON format parser targets the libtest JSON output schema documented at https://doc.rust-lang.org/cargo/reference/external-tools.html. Format changes in the libtest JSON schema are detected by a validation test that checks parser output against known output fixtures (stored in `crates/bm/tests/fixtures/cargo-test-output/`). If the schema changes in a future Rust release, the fixture test fails, signaling that the parser needs updating.
+
 **Failure categories:**
 - `assertion_failure` — `assert!` / `assert_eq!` / `assert_ne!`
 - `panic` — `panic!()` or unwrap failure
@@ -326,29 +334,65 @@ To:
 {"error": "No App client_id for member 'superman'", "category": "state", "remediation": "Run 'bm teams sync' to provision App credentials, or check that the member's GitHub App is installed."}
 ```
 
-**Implementation approach:**
+**Implementation approach (rev 2 -- explicit categorization at error sites):**
 
-1. Define `AgentError` struct with `message`, `category`, and `remediation` fields.
-2. `agent_main.rs` catches `anyhow::Error` at the top level and classifies it by inspecting the error chain for known patterns:
-   - "not found" / "No such file" → `Configuration`
-   - "not set" / "env var" → `Environment`
-   - "connect" / "request" / "HTTP" / "API" → `Network`
-   - "git" / "clone" / "push" / "remote" → `Git`
-   - "PID" / "state" / "workspace" / "alive" → `State`
-   - "permission" / "denied" / "scope" → `Permission`
-   - Default → `Internal`
+1. Define `AgentError` struct with constructor for explicit categorization:
 
-3. Known error sites in `bm-agent` gain explicit remediation messages:
+```rust
+impl AgentError {
+    /// Construct an agent error with explicit category and remediation.
+    /// Use this at known error sites where the category is deterministic.
+    pub fn new(category: ErrorCategory, message: impl Into<String>, remediation: impl Into<String>) -> Self {
+        AgentError {
+            error: message.into(),
+            category: category.to_string(),
+            remediation: remediation.into(),
+        }
+    }
+}
+```
 
-| Error | Category | Remediation |
-|-------|----------|-------------|
+2. **Known error sites** in `bm-agent` use `AgentError::new()` directly -- no classification needed because the category is known at the call site:
+
+| Error site | Category | Remediation |
+|------------|----------|-------------|
 | "Not in a BotMinter workspace" | `Configuration` | "Run this command from a BotMinter member workspace (directory containing .botminter.workspace)" |
 | "No App client_id for member" | `State` | "Run 'bm teams sync' to provision App credentials" |
 | "BM_TEAM_NAME not set" | `Environment` | "Set BM_TEAM_NAME or run from a started member workspace" |
 | "Failed to start loop" | `State` | "Check daemon is running ('bm status') and member exists" |
 | "No members found in team" | `Configuration` | "Run 'bm hire <role>' to add a member to the team" |
 
-This is incremental — `bm-agent` commands get explicit remediation first. Domain module errors fall back to category-by-pattern classification. Future stories can add explicit remediation to domain errors.
+3. **Fallback classification** for errors that bubble up WITHOUT explicit `AgentError` categorization: `agent_main.rs` catches `anyhow::Error` at the top level and runs `classify_error()`, which inspects only the **outermost** `.context()` message (the one the developer wrote intentionally), not the full error chain:
+
+```rust
+fn classify_error(err: &anyhow::Error) -> ErrorCategory {
+    // Only inspect the outermost context message — this is the one
+    // the developer intentionally wrote. Inner chain messages are
+    // from libraries and system calls, which are unreliable for classification.
+    let outer_msg = err.to_string();  // outermost .context() or root cause if no context
+
+    // Pattern matching on the developer-authored context message
+    if outer_msg.contains("not found") || outer_msg.contains("No such file") {
+        ErrorCategory::Configuration
+    } else if outer_msg.contains("not set") || outer_msg.contains("env var") {
+        ErrorCategory::Environment
+    } else if outer_msg.contains("connect") || outer_msg.contains("HTTP") {
+        ErrorCategory::Network
+    } else if outer_msg.contains("git") || outer_msg.contains("remote") {
+        ErrorCategory::Git
+    } else if outer_msg.contains("permission") || outer_msg.contains("denied") {
+        ErrorCategory::Permission
+    } else if outer_msg.contains("PID") || outer_msg.contains("workspace") {
+        ErrorCategory::State
+    } else {
+        ErrorCategory::Internal
+    }
+}
+```
+
+**Why outermost context only:** The full `anyhow` error chain includes messages from libraries, OS calls, and nested `.context()` calls. A deep chain might contain "connection refused" from a DNS lookup inside a git push, leading to misclassification as `Network` when the developer's context says "Failed to push to remote" (`Git`). The outermost `.context()` is the developer's intentional framing of the error.
+
+This is incremental -- `bm-agent` commands get explicit `AgentError::new()` remediation first. Domain module errors that propagate without explicit categorization fall back to `classify_error()`. Future stories can add `AgentError::new()` calls deeper in the stack to eliminate fallback classification.
 
 ### 3.3 Feature 3: Structured Test Output
 
@@ -453,7 +497,9 @@ required_env_vars:
 build_check: "cargo check -p bm --features console"
 ```
 
-`bm-agent env check` reads this file to know what to validate. This makes dev-boot project-specific — hypershift would have a different `dev-boot.yml` checking Go toolchain, `golangci-lint`, etc.
+`bm-agent env check` reads this file to know what to validate. This makes dev-boot project-specific -- hypershift would have a different `dev-boot.yml` checking Go toolchain, `golangci-lint`, etc.
+
+> **Note (rev 2): Dev-boot.yml security model.** `bm-agent env check` reads `dev-boot.yml` from the working directory (project root). In a PR context, the sentinel's merge gate validates all file changes including `dev-boot.yml` before merging. Feature branch changes to `dev-boot.yml` only affect the agent working on that branch, limiting blast radius. A malicious `dev-boot.yml` on a feature branch cannot affect other branches or the main branch until it passes the merge gate.
 
 ### 3.5 Feature 5: CLAUDE.md Maintenance Convention
 
@@ -490,6 +536,8 @@ If #118 (gardening) is deployed, a gardening scanner can check CLAUDE.md stalene
 
 If #118 is not deployed, staleness detection relies on the ownership convention (hat checks its sections during its work).
 
+> **Note (rev 2): CLAUDE.md enforcement before #118.** Until #118 deploys automated staleness detection, the `dev_code_reviewer` hat is responsible for checking CLAUDE.md accuracy during code review. This is added as a review checklist item in the hat instructions: "Verify that any CLAUDE.md sections affected by this change are updated in the same PR. Check the section ownership table in `projects/botminter/knowledge/claude-md-convention.md` to identify which sections the change touches."
+
 #### Auto-Generated Sections
 
 `bm-agent project describe` output can be used to generate or validate CLAUDE.md sections. This is not automated in this design — it's a tool available to hats. Example workflow:
@@ -504,7 +552,7 @@ Fully automated CLAUDE.md regeneration is explicitly deferred — the risk of ov
 
 ## 4. Data Models
 
-### 4.1 Agent Error Output
+### 4.1 Agent Error Output (rev 2)
 
 ```rust
 /// Structured error output for agent consumption.
@@ -516,6 +564,40 @@ pub struct AgentError {
     pub category: String,
     /// Suggested fix for the agent to attempt.
     pub remediation: String,
+}
+
+impl AgentError {
+    /// Construct an agent error with explicit category and remediation.
+    /// Use this at known error sites where the category is deterministic.
+    ///
+    /// Example:
+    ///   return Err(AgentError::new(
+    ///       ErrorCategory::Environment,
+    ///       "TESTS_GH_TOKEN not set",
+    ///       "export TESTS_GH_TOKEN=<token> — needed for E2E tests"
+    ///   ).into());
+    pub fn new(
+        category: ErrorCategory,
+        message: impl Into<String>,
+        remediation: impl Into<String>,
+    ) -> Self {
+        AgentError {
+            error: message.into(),
+            category: category.to_string(),
+            remediation: remediation.into(),
+        }
+    }
+
+    /// Construct from an anyhow::Error using fallback classification.
+    /// Only used for errors that propagate without explicit AgentError categorization.
+    pub fn from_anyhow(err: &anyhow::Error) -> Self {
+        let category = classify_error(err);
+        AgentError {
+            error: err.to_string(),
+            category: category.to_string(),
+            remediation: category.default_remediation().to_string(),
+        }
+    }
 }
 ```
 
@@ -672,6 +754,7 @@ build_check: string     # command to verify project builds
 | `knowledge/dev-boot.yml` | Dev boot configuration |
 | `knowledge/claude-md-convention.md` | CLAUDE.md maintenance convention |
 | `crates/bm/tests/exploratory/lib.sh` | Extended with `report_result()` function |
+| `crates/bm/tests/fixtures/cargo-test-output/` | (rev 2) Known output fixtures for JSON format validation test |
 
 ### Modified Files (Project Repo)
 
@@ -688,6 +771,7 @@ build_check: string     # command to verify project builds
 |------|--------|
 | `dev_implementer` hat instructions | Add dev-boot step (run `bm-agent env check` first) |
 | `qe_test_designer` hat instructions | Add env check for test infrastructure |
+| `dev_code_reviewer` hat instructions | (rev 2) Add CLAUDE.md accuracy check to review checklist |
 
 ### No Changes To
 
@@ -733,3 +817,18 @@ Structured error output includes file paths, tool versions, and environment vari
 ### No New Secrets
 
 No new credentials, tokens, or secrets are introduced. All tools use existing authentication (`GH_TOKEN`, system keyring). `bm-agent env check` validates that required env vars are SET, not their values.
+
+---
+
+## Appendix: Revision 2 Changes
+
+This revision addresses 6 findings from the lead design review:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | Error classification relies on fragile string-matching across full error chain | Critical | Replaced with two-tier approach (Section 3.2): known error sites use explicit `AgentError::new(category, message, remediation)` -- no classification needed. Fallback `classify_error()` inspects only the outermost `.context()` message, not the full chain. Updated Data Models (Section 4.1) with constructor pattern. |
+| 2 | cargo test JSON format stability undocumented | Acknowledge | Added note in Section 3.1: JSON parser targets the libtest JSON output schema. Validation test checks against known output fixtures to detect format changes. |
+| 3 | Module discovery definition missing | Significant | Added definition in Section 3.1: a module is a first-level subdirectory of `crates/bm/src/` containing `mod.rs` (per ADR-0006). Nested directories are NOT separate modules. |
+| 4 | `project describe` is BotMinter-specific with no generality path | Significant | Added note in Section 3.1: non-Rust projects return minimal JSON with `"language": "unknown"`. Future plugin pattern via `project-descriptor.sh`. Added `--project` flag. |
+| 5 | CLAUDE.md enforcement gap before #118 | Acknowledge | Added note in Section 3.5: `dev_code_reviewer` hat checks CLAUDE.md accuracy during code review as a review checklist item until #118 deploys automated staleness detection. |
+| 6 | Dev-boot.yml security model unclear in PR context | Acknowledge | Added note in Section 3.4: `dev-boot.yml` read from working directory, sentinel validates changes at merge gate, feature branch changes limited to that branch's agent. |
